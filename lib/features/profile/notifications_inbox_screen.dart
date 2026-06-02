@@ -1028,7 +1028,7 @@ class _EmptyState extends StatelessWidget {
             const SizedBox(height: DS.s8),
             Text(
               isAllCaughtUp
-                  ? 'You\'ve read all your notifications. Great job!'
+                  ? 'You\'ve read all your notifications. Great job !'
                   : 'New notifications will appear here.',
               style: const TextStyle(
                 color: DS.textSecondary,
