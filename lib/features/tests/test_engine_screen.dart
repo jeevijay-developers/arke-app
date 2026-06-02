@@ -1,0 +1,2130 @@
+import 'dart:async';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_html/flutter_html.dart';
+import 'package:flutter_math_fork/flutter_math.dart';
+import 'package:go_router/go_router.dart';
+import '../../core/services/supabase_service.dart';
+import 'test_result_screen.dart';
+
+// ─────────────────────────────────────────────
+// 💡 Move DS to lib/core/theme/design_system.dart
+// ─────────────────────────────────────────────
+abstract class DS {
+  static const primary = Color(0xFFF97315);
+  static const primaryLight = Color(0xFFFFF0E6);
+  static const primaryDark = Color(0xFFE05A00);
+
+  static const background = Color(0xFFFFFBF8);
+  static const surface = Color(0xFFFFFFFF);
+  static const surfaceVariant = Color(0xFFF9FAFB);
+
+  static const textPrimary = Color(0xFF111827);
+  static const textSecondary = Color(0xFF6B7280);
+  static const textHint = Color(0xFFD1D5DB);
+  static const border = Color(0xFFE5E7EB);
+
+  static const error = Color(0xFFEF4444);
+  static const errorSurface = Color(0xFFFEF2F2);
+  static const success = Color(0xFF10B981);
+  static const successSurface = Color(0xFFECFDF5);
+  static const warning = Color(0xFFF59E0B);
+  static const warningSurface = Color(0xFFFFFBEB);
+  static const indigo = Color(0xFF6366F1);
+  static const indigoLight = Color(0xFFEEF2FF);
+
+  static const double s2 = 2;
+  static const double s4 = 4;
+  static const double s6 = 6;
+  static const double s8 = 8;
+  static const double s10 = 10;
+  static const double s12 = 12;
+  static const double s14 = 14;
+  static const double s16 = 16;
+  static const double s20 = 20;
+  static const double s24 = 24;
+  static const double s28 = 28;
+  static const double s32 = 32;
+
+  static const double radiusSm = 10;
+  static const double radiusMd = 14;
+  static const double radiusLg = 20;
+  static const double radiusXl = 28;
+}
+
+// ─────────────────────────────────────────────
+// MATH-AWARE TEXT RENDERER
+// ─────────────────────────────────────────────
+class MathText extends StatelessWidget {
+  final String text;
+  final TextStyle? style;
+  final int? maxLines;
+
+  const MathText(this.text, {super.key, this.style, this.maxLines});
+
+  @override
+  Widget build(BuildContext context) {
+    final base = style ?? DefaultTextStyle.of(context).style;
+    final parts = text.split(RegExp(r'\$'));
+    if (parts.length == 1) return Text(text, style: base, maxLines: maxLines);
+
+    final spans = <InlineSpan>[];
+    for (int i = 0; i < parts.length; i++) {
+      final part = parts[i];
+      if (part.isEmpty) continue;
+      if (i.isOdd) {
+        spans.add(
+          WidgetSpan(
+            alignment: PlaceholderAlignment.middle,
+            child: Math.tex(
+              part,
+              textStyle: base,
+              onErrorFallback: (e) => Text(part, style: base),
+            ),
+          ),
+        );
+      } else {
+        spans.add(TextSpan(text: part, style: base));
+      }
+    }
+
+    return RichText(
+      maxLines: maxLines,
+      overflow: maxLines == null ? TextOverflow.clip : TextOverflow.ellipsis,
+      text: TextSpan(children: spans, style: base),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// OPTION ITEM — text + optional image URL
+// ─────────────────────────────────────────────
+class OptionItem {
+  final String text;       // plain text, HTML tags stripped
+  final String? imageUrl;  // extracted <img src> if present
+
+  const OptionItem({required this.text, this.imageUrl});
+
+  static final _imgRe = RegExp('<img[^>]+src=["\']([^"\']+)["\']', caseSensitive: false);
+  static final _tagRe = RegExp('<[^>]+>');
+
+  factory OptionItem.fromRaw(String raw) {
+    final imgMatch = _imgRe.firstMatch(raw);
+    final imageUrl = imgMatch?.group(1);
+    final text = raw
+        .replaceAll(_imgRe, '')
+        .replaceAll(_tagRe, '')
+        .trim();
+    return OptionItem(text: text, imageUrl: imageUrl);
+  }
+}
+
+// ─────────────────────────────────────────────
+// QUESTION MODEL
+// ─────────────────────────────────────────────
+class TestQuestion {
+  final String id;
+  final String text;
+  final List<String> imageUrls; // extracted <img> src values from question text
+  final List<OptionItem> options;
+  final int correctIndex;
+  final String correctAnswerText; // for integer/fill-in questions
+  final String subject;
+  final String? explanation;
+  final bool hasHtml;
+  final String questionType; // 'mcq', 'integer', 'fill_in_the_blank', etc.
+
+  bool get isIntegerType =>
+      questionType == 'integer' ||
+      questionType == 'fill_in_the_blank' ||
+      questionType == 'numerical' ||
+      options.isEmpty; // no options in DB → treat as fill-in
+
+  const TestQuestion({
+    required this.id,
+    required this.text,
+    required this.imageUrls,
+    required this.options,
+    required this.correctIndex,
+    required this.correctAnswerText,
+    required this.subject,
+    required this.hasHtml,
+    required this.questionType,
+    this.explanation,
+  });
+
+  factory TestQuestion.fromJson(Map<String, dynamic> j) {
+    final rawOpts = j['options'];
+    List<OptionItem> opts = [];
+    if (rawOpts is List && rawOpts.isNotEmpty) {
+      opts = rawOpts.map((e) {
+        final raw = e is Map ? (e['text'] ?? e['value'] ?? '').toString() : e.toString();
+        return OptionItem.fromRaw(raw);
+      }).toList();
+    }
+
+    String text = j['question_text'] as String? ?? '';
+    final hasHtml = text.contains('<') && text.contains('>');
+
+    // Extract all <img src="..."> URLs before any text manipulation
+    final imgRegex = RegExp('<img[^>]+src=["\']([^"\']+)["\']', caseSensitive: false);
+    final imageUrls = imgRegex.allMatches(text).map((m) => m.group(1)!).toList();
+
+    // Strip <img> tags so flutter_html doesn't fail on them;
+    // we render images explicitly via CachedNetworkImage.
+    if (imageUrls.isNotEmpty) {
+      text = text.replaceAll(RegExp('<img[^>]*/?>', caseSensitive: false), '');
+    }
+
+    if (opts.isEmpty && hasHtml) {
+      final optRegex = RegExp(
+        r'<br\s*/?>\s*<strong>\(\d+\)\s*</strong>\s*<strong>(.*?)</strong>',
+        caseSensitive: false,
+      );
+      final matches = optRegex.allMatches(text);
+      if (matches.isNotEmpty) {
+        opts = matches
+            .map((m) => OptionItem.fromRaw(m.group(1)!))
+            .toList();
+        final firstOptIdx = text.indexOf(RegExp(r'<br\s*/?>\s*<strong>\(1\)'));
+        if (firstOptIdx > 0) text = text.substring(0, firstOptIdx).trim();
+      }
+    }
+
+    final raw = j['correct_answer'];
+    int correctIndex = 0;
+    String correctAnswerText = '';
+    if (raw is int) {
+      correctIndex = raw;
+      correctAnswerText = raw.toString();
+    } else if (raw is String) {
+      correctAnswerText = raw.trim();
+      final asInt = int.tryParse(raw);
+      if (asInt != null) {
+        correctIndex = asInt;
+      } else {
+        final idx = opts.indexWhere((o) => o.text == raw.trim());
+        correctIndex = idx >= 0 ? idx : 0;
+      }
+    } else if (raw is Map) {
+      final idx = raw['index'] ?? raw['correct_index'];
+      if (idx is int) correctIndex = idx;
+      correctAnswerText = correctIndex.toString();
+    }
+
+    final questionType = (j['question_type'] as String?)?.toLowerCase().trim() ?? 'mcq';
+
+    return TestQuestion(
+      id: j['id'] as String,
+      text: text,
+      imageUrls: imageUrls,
+      options: opts,
+      correctIndex: correctIndex,
+      correctAnswerText: correctAnswerText,
+      subject: j['subject'] as String? ?? '',
+      explanation: j['explanation'] as String?,
+      hasHtml: hasHtml,
+      questionType: questionType,
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// TEST ENGINE SCREEN
+// ─────────────────────────────────────────────
+class TestEngineScreen extends StatefulWidget {
+  final String testId;
+  const TestEngineScreen({super.key, required this.testId});
+
+  @override
+  State<TestEngineScreen> createState() => _TestEngineScreenState();
+}
+
+class _TestEngineScreenState extends State<TestEngineScreen>
+    with SingleTickerProviderStateMixin {
+  final _db = SupabaseService.client;
+
+  bool _loading = true;
+  String? _error;
+  String _testTitle = '';
+  int _durationSeconds = 30 * 60;
+  List<TestQuestion> _questions = [];
+  // int? for MCQ (option index), String for integer/fill-in, null = unanswered
+  Map<String, dynamic> _answers = {};
+  // Text controllers for integer/fill-in questions, keyed by question id
+  final Map<String, TextEditingController> _intCtrls = {};
+  final Set<String> _marked = {};
+  int _index = 0;
+  int _remaining = 0;
+  bool _saving = false;
+  bool _submitting = false;
+  Timer? _timer;
+
+  // Animation for timer urgency
+  late AnimationController _pulseCtrl;
+  late Animation<double> _pulseAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    )..repeat(reverse: true);
+    _pulseAnim = Tween<double>(
+      begin: 1.0,
+      end: 1.06,
+    ).animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
+    _loadTest();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _pulseCtrl.dispose();
+    for (final c in _intCtrls.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _loadTest() async {
+    try {
+      final testData = await _db
+          .from('tests')
+          .select('title, duration_minutes')
+          .eq('id', widget.testId)
+          .single();
+
+      _testTitle = testData['title'] as String? ?? 'Test';
+      _durationSeconds = ((testData['duration_minutes'] as int?) ?? 30) * 60;
+
+      final qData = await _db
+          .from('test_questions')
+          .select(
+            'id, question_text, options, correct_answer, subject, explanation, question_type',
+          )
+          .eq('test_id', widget.testId)
+          .order('position', ascending: true);
+
+      _questions = (qData as List)
+          .map((r) => TestQuestion.fromJson(r as Map<String, dynamic>))
+          .toList();
+
+      if (_questions.isEmpty) {
+        setState(() {
+          _loading = false;
+          _error = 'No questions found for this test.';
+        });
+        return;
+      }
+
+      _answers = {for (final q in _questions) q.id: null};
+      // Create a TextEditingController for every integer/fill-in question
+      for (final q in _questions) {
+        if (q.isIntegerType) {
+          final ctrl = TextEditingController();
+          ctrl.addListener(() {
+            final val = ctrl.text.trim();
+            _answers[q.id] = val.isEmpty ? null : val;
+          });
+          _intCtrls[q.id] = ctrl;
+        }
+      }
+      _remaining = _durationSeconds;
+
+      _timer = Timer.periodic(const Duration(seconds: 1), (t) {
+        if (!mounted) return;
+        setState(() => _remaining--);
+        if (_remaining <= 0) {
+          t.cancel();
+          _submit();
+        }
+        if (_remaining % 30 == 0) _autosave();
+      });
+
+      setState(() => _loading = false);
+    } catch (e) {
+      setState(() {
+        _loading = false;
+        _error = 'Failed to load test: $e';
+      });
+    }
+  }
+
+  Future<void> _autosave() async {
+    if (mounted) setState(() => _saving = true);
+    await Future.delayed(const Duration(milliseconds: 300));
+    if (mounted) setState(() => _saving = false);
+  }
+
+  String _fmt(int s) {
+    if (s < 0) s = 0;
+    final h = s ~/ 3600;
+    final m = (s % 3600) ~/ 60;
+    final ss = (s % 60).toString().padLeft(2, '0');
+    if (h > 0) return '$h:${m.toString().padLeft(2, '0')}:$ss';
+    return '${m.toString().padLeft(2, '0')}:$ss';
+  }
+
+  // ── Derived stats ──
+  int get _answeredCount => _answers.values.where((v) => v != null).length;
+  int get _markedCount => _marked.length;
+
+  bool _isCorrect(TestQuestion q) {
+    final ans = _answers[q.id];
+    if (ans == null) return false;
+    if (q.isIntegerType) {
+      return ans.toString().trim() == q.correctAnswerText.trim();
+    }
+    return ans == q.correctIndex;
+  }
+
+  Future<void> _submit() async {
+    if (_submitting) return;
+    setState(() => _submitting = true);
+    _timer?.cancel();
+
+    final score = _questions.where(_isCorrect).length;
+    final answered = _answeredCount;
+    final userId = _db.auth.currentUser?.id;
+
+    String? attemptId;
+    try {
+      if (userId != null) {
+        final pct = _questions.isEmpty
+            ? 0.0
+            : (score * 100 / _questions.length);
+        final res = await _db
+            .from('test_attempts')
+            .insert({
+              'user_id': userId,
+              'test_id': widget.testId,
+              'test_name': _testTitle,
+              'score': pct,
+              'correct_answers': score,
+              'total_questions': _questions.length,
+              'percentile': pct,
+              'time_spent_seconds': _durationSeconds - _remaining,
+              'attempted_at': DateTime.now().toIso8601String(),
+              'answers': _answers.map((k, v) => MapEntry(k, v)),
+              'status': 'submitted',
+            })
+            .select('id')
+            .single();
+        attemptId = res['id'] as String?;
+      }
+    } catch (_) {}
+
+    TestResultScreen.lastResult = TestResult(
+      testId: widget.testId,
+      attemptId: attemptId ?? widget.testId,
+      title: _testTitle,
+      score: score,
+      total: _questions.length,
+      answered: answered,
+      answers: Map.of(_answers),
+      questions: _questions,
+    );
+
+    if (mounted) {
+      context.pushReplacement('/test-result/${attemptId ?? widget.testId}');
+    }
+  }
+
+  void _confirmLeave() async {
+    HapticFeedback.mediumImpact();
+    final ok =
+        await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => _LeaveDialog(),
+        ) ??
+        false;
+    if (ok && mounted) context.pop();
+  }
+
+  void _confirmSubmit() async {
+    HapticFeedback.mediumImpact();
+    final unanswered = _questions.length - _answeredCount;
+    final ok =
+        await showDialog<bool>(
+          context: context,
+          builder: (_) => _SubmitDialog(
+            answered: _answeredCount,
+            total: _questions.length,
+            unanswered: unanswered,
+            marked: _markedCount,
+          ),
+        ) ??
+        false;
+    if (ok) _submit();
+  }
+
+  // ─────────────────────────────────────────────
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) return _LoadingScaffold(title: _testTitle);
+    if (_error != null) return _ErrorScaffold(message: _error!);
+
+    final q = _questions[_index];
+    final timerRed = _remaining < 60;
+    final progress = (_index + 1) / _questions.length;
+
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _confirmLeave();
+      },
+      child: Scaffold(
+        backgroundColor: DS.background,
+
+        // ── App Bar ──
+        appBar: _TestAppBar(
+          title: _testTitle,
+          index: _index,
+          total: _questions.length,
+          remaining: _remaining,
+          timerRed: timerRed,
+          saving: _saving,
+          pulseAnim: _pulseAnim,
+          onClose: _confirmLeave,
+          fmtTime: _fmt,
+        ),
+
+        body: SafeArea(
+          top: false,
+          child: Column(
+            children: [
+              // ── Progress bar ──
+              _ProgressSection(
+                progress: progress,
+                saving: _saving,
+                answeredCount: _answeredCount,
+                total: _questions.length,
+                markedCount: _markedCount,
+              ),
+
+              // ── Question content ──
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(
+                    DS.s16,
+                    DS.s16,
+                    DS.s16,
+                    DS.s8,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Question header card
+                      _QuestionHeader(
+                        index: _index,
+                        total: _questions.length,
+                        subject: q.subject,
+                        marked: _marked.contains(q.id),
+                        onToggleMark: () {
+                          HapticFeedback.selectionClick();
+                          setState(
+                            () => _marked.contains(q.id)
+                                ? _marked.remove(q.id)
+                                : _marked.add(q.id),
+                          );
+                        },
+                      ),
+
+                      const SizedBox(height: DS.s16),
+
+                      // Question text card
+                      _QuestionTextCard(question: q),
+
+                      const SizedBox(height: DS.s16),
+
+                      // Options / integer input
+                      if (q.isIntegerType && _intCtrls[q.id] != null)
+                        _IntegerAnswerField(
+                          controller: _intCtrls[q.id]!,
+                        )
+                      else
+                        ...List.generate(
+                          q.options.length,
+                          (i) => _OptionTile(
+                            index: i,
+                            option: q.options[i],
+                            selected: _answers[q.id] == i,
+                            onTap: () {
+                              HapticFeedback.selectionClick();
+                              setState(() => _answers[q.id] = i);
+                            },
+                          ),
+                        ),
+
+                      const SizedBox(height: DS.s16),
+                    ],
+                  ),
+                ),
+              ),
+
+              // ── Bottom navigation ──
+              _BottomNav(
+                index: _index,
+                total: _questions.length,
+                isMarked: _marked.contains(q.id),
+                submitting: _submitting,
+                onMark: () {
+                  HapticFeedback.selectionClick();
+                  setState(
+                    () => _marked.contains(q.id)
+                        ? _marked.remove(q.id)
+                        : _marked.add(q.id),
+                  );
+                },
+                onPalette: _showPalette,
+                onPrev: _index > 0 ? () => setState(() => _index--) : null,
+                onNext: () {
+                  if (_index < _questions.length - 1) {
+                    setState(() => _index++);
+                  } else {
+                    _confirmSubmit();
+                  }
+                },
+                isLast: _index == _questions.length - 1,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showPalette() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: DS.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(DS.radiusXl)),
+      ),
+      builder: (_) => _PaletteSheet(
+        questions: _questions,
+        answers: _answers,
+        marked: _marked,
+        currentIdx: _index,
+        onTap: (i) {
+          setState(() => _index = i);
+          Navigator.pop(context);
+        },
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// TEST APP BAR
+// ─────────────────────────────────────────────
+class _TestAppBar extends StatelessWidget implements PreferredSizeWidget {
+  final String title;
+  final int index, total, remaining;
+  final bool timerRed, saving;
+  final Animation<double> pulseAnim;
+  final VoidCallback onClose;
+  final String Function(int) fmtTime;
+
+  const _TestAppBar({
+    required this.title,
+    required this.index,
+    required this.total,
+    required this.remaining,
+    required this.timerRed,
+    required this.saving,
+    required this.pulseAnim,
+    required this.onClose,
+    required this.fmtTime,
+  });
+
+  @override
+  Size get preferredSize => const Size.fromHeight(60);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: DS.surface,
+        border: Border(bottom: BorderSide(color: DS.border, width: 1)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: DS.s8,
+            vertical: DS.s10,
+          ),
+          child: Row(
+            children: [
+              // Close
+              GestureDetector(
+                onTap: onClose,
+                child: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: DS.errorSurface,
+                    borderRadius: BorderRadius.circular(DS.radiusSm),
+                    border: Border.all(
+                      color: DS.error.withOpacity(0.20),
+                      width: 1,
+                    ),
+                  ),
+                  child: const Icon(
+                    Icons.close_rounded,
+                    color: DS.error,
+                    size: 18,
+                  ),
+                ),
+              ),
+              const SizedBox(width: DS.s10),
+
+              // Title + Q counter
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: DS.textPrimary,
+                        letterSpacing: -0.1,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      'Question ${index + 1} of $total',
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        color: DS.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Saving indicator
+              if (saving) ...[
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.5,
+                    color: DS.primary,
+                  ),
+                ),
+                const SizedBox(width: DS.s8),
+              ],
+
+              // Timer
+              ScaleTransition(
+                scale: timerRed ? pulseAnim : const AlwaysStoppedAnimation(1.0),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: DS.s12,
+                    vertical: DS.s8,
+                  ),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: timerRed
+                          ? [const Color(0xFFFF6B6B), DS.error]
+                          : [const Color(0xFFFF8C38), DS.primary],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(999),
+                    boxShadow: [
+                      BoxShadow(
+                        color: (timerRed ? DS.error : DS.primary).withOpacity(
+                          0.28,
+                        ),
+                        blurRadius: 8,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.schedule_rounded,
+                        color: Colors.white,
+                        size: 13,
+                      ),
+                      const SizedBox(width: DS.s4),
+                      Text(
+                        fmtTime(remaining),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 13.5,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// PROGRESS SECTION
+// ─────────────────────────────────────────────
+class _ProgressSection extends StatelessWidget {
+  final double progress;
+  final bool saving;
+  final int answeredCount, total, markedCount;
+
+  const _ProgressSection({
+    required this.progress,
+    required this.saving,
+    required this.answeredCount,
+    required this.total,
+    required this.markedCount,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        // Autosave indicator
+        if (saving)
+          Container(
+            height: 2,
+            child: const LinearProgressIndicator(
+              color: DS.success,
+              backgroundColor: DS.border,
+            ),
+          ),
+
+        // Main progress bar
+        Stack(
+          children: [
+            Container(height: 6, color: DS.border),
+            FractionallySizedBox(
+              widthFactor: progress,
+              child: Container(
+                height: 6,
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Color(0xFFFF8C38), DS.primary],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+
+        // Stats row
+        Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: DS.s16,
+            vertical: DS.s8,
+          ),
+          child: Row(
+            children: [
+              _ProgressStat(
+                color: DS.success,
+                icon: Icons.check_circle_outline_rounded,
+                label: '$answeredCount answered',
+              ),
+              const SizedBox(width: DS.s16),
+              _ProgressStat(
+                color: DS.textHint,
+                icon: Icons.radio_button_unchecked_rounded,
+                label: '${total - answeredCount} remaining',
+              ),
+              if (markedCount > 0) ...[
+                const SizedBox(width: DS.s16),
+                _ProgressStat(
+                  color: DS.warning,
+                  icon: Icons.bookmark_rounded,
+                  label: '$markedCount marked',
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ProgressStat extends StatelessWidget {
+  final Color color;
+  final IconData icon;
+  final String label;
+
+  const _ProgressStat({
+    required this.color,
+    required this.icon,
+    required this.label,
+  });
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(icon, size: 12, color: color),
+      const SizedBox(width: DS.s4),
+      Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 11.5,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    ],
+  );
+}
+
+// ─────────────────────────────────────────────
+// QUESTION HEADER
+// ─────────────────────────────────────────────
+class _QuestionHeader extends StatelessWidget {
+  final int index, total;
+  final String subject;
+  final bool marked;
+  final VoidCallback onToggleMark;
+
+  const _QuestionHeader({
+    required this.index,
+    required this.total,
+    required this.subject,
+    required this.marked,
+    required this.onToggleMark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        // Q number badge
+        Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: DS.s10,
+            vertical: DS.s6,
+          ),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFFFF8C38), DS.primary],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(DS.radiusSm),
+          ),
+          child: Text(
+            'Q ${index + 1}',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12.5,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        const SizedBox(width: DS.s8),
+
+        // Subject chip
+        if (subject.isNotEmpty)
+          Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: DS.s8,
+              vertical: DS.s6,
+            ),
+            decoration: BoxDecoration(
+              color: DS.primaryLight,
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: DS.primary.withOpacity(0.20), width: 1),
+            ),
+            child: Text(
+              subject,
+              style: const TextStyle(
+                color: DS.primary,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+
+        const Spacer(),
+
+        // Mark for review
+        GestureDetector(
+          onTap: onToggleMark,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            padding: const EdgeInsets.symmetric(
+              horizontal: DS.s10,
+              vertical: DS.s6,
+            ),
+            decoration: BoxDecoration(
+              color: marked ? DS.warningSurface : DS.surfaceVariant,
+              borderRadius: BorderRadius.circular(DS.radiusSm),
+              border: Border.all(
+                color: marked ? DS.warning.withOpacity(0.40) : DS.border,
+                width: 1,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  marked
+                      ? Icons.bookmark_rounded
+                      : Icons.bookmark_border_rounded,
+                  size: 13,
+                  color: marked ? DS.warning : DS.textSecondary,
+                ),
+                const SizedBox(width: DS.s4),
+                Text(
+                  marked ? 'Marked' : 'Mark',
+                  style: TextStyle(
+                    color: marked ? DS.warning : DS.textSecondary,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// QUESTION TEXT CARD
+// ─────────────────────────────────────────────
+class _QuestionTextCard extends StatelessWidget {
+  final TestQuestion question;
+  const _QuestionTextCard({required this.question});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(DS.s16),
+      decoration: BoxDecoration(
+        color: DS.surface,
+        borderRadius: BorderRadius.circular(DS.radiusMd),
+        border: Border.all(color: DS.border, width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Question text ──
+          if (question.hasHtml)
+            LayoutBuilder(
+              builder: (context, constraints) => Html(
+                data: question.text,
+                shrinkWrap: true,
+                style: {
+                  'body': Style(
+                    fontSize: FontSize(15),
+                    color: DS.textPrimary,
+                    lineHeight: const LineHeight(1.6),
+                    margin: Margins.zero,
+                    padding: HtmlPaddings.zero,
+                  ),
+                  'strong': Style(fontWeight: FontWeight.w700),
+                },
+              ),
+            )
+          else
+            MathText(
+              question.text,
+              style: const TextStyle(
+                color: DS.textPrimary,
+                fontSize: 15.5,
+                height: 1.6,
+              ),
+            ),
+
+          // ── Images (extracted from <img> tags) ──
+          if (question.imageUrls.isNotEmpty) ...[
+            const SizedBox(height: DS.s12),
+            ...question.imageUrls.map(
+              (url) => Padding(
+                padding: const EdgeInsets.only(bottom: DS.s8),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(DS.radiusSm),
+                  child: CachedNetworkImage(
+                    imageUrl: url,
+                    width: double.infinity,
+                    fit: BoxFit.contain,
+                    placeholder: (context, url) => Container(
+                      height: 160,
+                      color: DS.surfaceVariant,
+                      child: const Center(
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: DS.primary,
+                        ),
+                      ),
+                    ),
+                    errorWidget: (context, url, error) => Container(
+                      height: 80,
+                      decoration: BoxDecoration(
+                        color: DS.surfaceVariant,
+                        borderRadius: BorderRadius.circular(DS.radiusSm),
+                      ),
+                      child: const Center(
+                        child: Icon(Icons.broken_image_outlined,
+                            color: DS.textSecondary, size: 32),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// INTEGER / FILL-IN ANSWER FIELD
+// ─────────────────────────────────────────────
+class _IntegerAnswerField extends StatelessWidget {
+  final TextEditingController controller;
+  const _IntegerAnswerField({required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Your Answer',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: DS.textSecondary,
+            letterSpacing: 0.2,
+          ),
+        ),
+        const SizedBox(height: DS.s8),
+        TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(
+            signed: true,
+            decimal: true,
+          ),
+          textInputAction: TextInputAction.done,
+          style: const TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w700,
+            color: DS.textPrimary,
+          ),
+          decoration: InputDecoration(
+            hintText: 'Enter numeric answer…',
+            hintStyle: const TextStyle(
+              color: DS.textHint,
+              fontSize: 15,
+              fontWeight: FontWeight.w400,
+            ),
+            filled: true,
+            fillColor: DS.surface,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: DS.s16,
+              vertical: DS.s16,
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(DS.radiusMd),
+              borderSide: const BorderSide(color: DS.border, width: 1.2),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(DS.radiusMd),
+              borderSide: const BorderSide(color: DS.primary, width: 2),
+            ),
+            suffixIcon: ValueListenableBuilder<TextEditingValue>(
+              valueListenable: controller,
+              builder: (_, v, _) => v.text.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear_rounded,
+                          color: DS.textSecondary, size: 18),
+                      onPressed: controller.clear,
+                    )
+                  : const SizedBox.shrink(),
+            ),
+          ),
+        ),
+        const SizedBox(height: DS.s8),
+        const Text(
+          'Type a number. Decimals and negatives are allowed.',
+          style: TextStyle(fontSize: 11.5, color: DS.textSecondary),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// OPTION TILE
+// ─────────────────────────────────────────────
+class _OptionTile extends StatelessWidget {
+  final int index;
+  final OptionItem option;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _OptionTile({
+    required this.index,
+    required this.option,
+    required this.selected,
+    required this.onTap,
+  });
+
+  static const _letters = ['A', 'B', 'C', 'D', 'E', 'F'];
+
+  @override
+  Widget build(BuildContext context) {
+    final letter = index < _letters.length ? _letters[index] : '${index + 1}';
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: DS.s10),
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.all(DS.s14),
+          decoration: BoxDecoration(
+            color: selected ? DS.primaryLight : DS.surface,
+            borderRadius: BorderRadius.circular(DS.radiusMd),
+            border: Border.all(
+              color: selected ? DS.primary : DS.border,
+              width: selected ? 1.8 : 1.2,
+            ),
+            boxShadow: selected
+                ? [BoxShadow(color: DS.primary.withValues(alpha: 0.12), blurRadius: 10, offset: const Offset(0, 3))]
+                : [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 4, offset: const Offset(0, 1))],
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Letter badge
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  gradient: selected
+                      ? const LinearGradient(
+                          colors: [Color(0xFFFF8C38), DS.primary],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        )
+                      : null,
+                  color: selected ? null : DS.surfaceVariant,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: selected ? DS.primary : DS.border,
+                    width: 1.2,
+                  ),
+                ),
+                child: Center(
+                  child: Text(
+                    letter,
+                    style: TextStyle(
+                      color: selected ? Colors.white : DS.textSecondary,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ),
+
+              const SizedBox(width: DS.s12),
+
+              // Option content (text + optional image)
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (option.text.isNotEmpty)
+                      MathText(
+                        option.text,
+                        style: TextStyle(
+                          color: selected ? DS.primaryDark : DS.textPrimary,
+                          fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                          fontSize: 14.5,
+                          height: 1.4,
+                        ),
+                      ),
+                    if (option.imageUrl != null) ...[
+                      if (option.text.isNotEmpty) const SizedBox(height: DS.s8),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(DS.radiusSm),
+                        child: CachedNetworkImage(
+                          imageUrl: option.imageUrl!,
+                          fit: BoxFit.contain,
+                          placeholder: (_, _) => Container(
+                            height: 80,
+                            color: DS.surfaceVariant,
+                            child: const Center(
+                              child: CircularProgressIndicator(strokeWidth: 2, color: DS.primary),
+                            ),
+                          ),
+                          errorWidget: (_, _, _) => const Icon(
+                            Icons.broken_image_outlined,
+                            color: DS.textSecondary,
+                            size: 28,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+
+              // Selected indicator
+              if (selected) ...[
+                const SizedBox(width: DS.s8),
+                const Icon(Icons.check_circle_rounded, color: DS.primary, size: 18),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// BOTTOM NAVIGATION
+// ─────────────────────────────────────────────
+class _BottomNav extends StatelessWidget {
+  final int index, total;
+  final bool isMarked, submitting, isLast;
+  final VoidCallback onMark;
+  final VoidCallback onPalette;
+  final VoidCallback? onPrev;
+  final VoidCallback onNext;
+
+  const _BottomNav({
+    required this.index,
+    required this.total,
+    required this.isMarked,
+    required this.submitting,
+    required this.isLast,
+    required this.onMark,
+    required this.onPalette,
+    required this.onPrev,
+    required this.onNext,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+        DS.s12,
+        DS.s10,
+        DS.s12,
+        DS.s10 + MediaQuery.of(context).padding.bottom,
+      ),
+      decoration: BoxDecoration(
+        color: DS.surface,
+        border: Border(top: BorderSide(color: DS.border, width: 1)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 12,
+            offset: const Offset(0, -3),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          // Palette button
+          _NavIconBtn(
+            icon: Icons.apps_rounded,
+            onTap: onPalette,
+            tooltip: 'Question palette',
+          ),
+          const SizedBox(width: DS.s8),
+
+          // Prev button
+          if (onPrev != null) ...[
+            _NavIconBtn(
+              icon: Icons.arrow_back_ios_new_rounded,
+              onTap: onPrev!,
+              tooltip: 'Previous',
+              size: 15,
+            ),
+            const SizedBox(width: DS.s8),
+          ],
+
+          const Spacer(),
+
+          // Next / Submit
+          SizedBox(
+            height: 44,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: submitting
+                    ? null
+                    : isLast
+                    ? const LinearGradient(
+                        colors: [DS.success, Color(0xFF059669)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      )
+                    : const LinearGradient(
+                        colors: [Color(0xFFFF8C38), DS.primary],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                color: submitting ? DS.border : null,
+                borderRadius: BorderRadius.circular(DS.radiusMd),
+                boxShadow: submitting
+                    ? []
+                    : [
+                        BoxShadow(
+                          color: (isLast ? DS.success : DS.primary).withOpacity(
+                            0.28,
+                          ),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+              ),
+              child: ElevatedButton(
+                onPressed: submitting ? null : onNext,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.transparent,
+                  shadowColor: Colors.transparent,
+                  disabledBackgroundColor: Colors.transparent,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: DS.s20),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(DS.radiusMd),
+                  ),
+                ),
+                child: submitting
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
+                      )
+                    : Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            isLast ? 'Submit' : 'Save & Next',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(width: DS.s6),
+                          Icon(
+                            isLast
+                                ? Icons.check_circle_rounded
+                                : Icons.arrow_forward_rounded,
+                            size: 16,
+                          ),
+                        ],
+                      ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NavIconBtn extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  final String tooltip;
+  final double size;
+
+  const _NavIconBtn({
+    required this.icon,
+    required this.onTap,
+    required this.tooltip,
+    this.size = 18,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: DS.surfaceVariant,
+            borderRadius: BorderRadius.circular(DS.radiusSm),
+            border: Border.all(color: DS.border, width: 1),
+          ),
+          child: Icon(icon, size: size, color: DS.textSecondary),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// QUESTION PALETTE SHEET
+// ─────────────────────────────────────────────
+class _PaletteSheet extends StatelessWidget {
+  final List<TestQuestion> questions;
+  final Map<String, dynamic> answers;
+  final Set<String> marked;
+  final int currentIdx;
+  final void Function(int) onTap;
+
+  const _PaletteSheet({
+    required this.questions,
+    required this.answers,
+    required this.marked,
+    required this.currentIdx,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(DS.s24, DS.s20, DS.s24, DS.s28),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Handle
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: DS.border,
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+          ),
+          const SizedBox(height: DS.s16),
+
+          // Title
+          Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: DS.primaryLight,
+                  borderRadius: BorderRadius.circular(DS.radiusSm),
+                ),
+                child: const Icon(
+                  Icons.apps_rounded,
+                  color: DS.primary,
+                  size: 18,
+                ),
+              ),
+              const SizedBox(width: DS.s12),
+              const Text(
+                'Question Palette',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: DS.textPrimary,
+                  letterSpacing: -0.3,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '${questions.length} total',
+                style: const TextStyle(color: DS.textSecondary, fontSize: 12.5),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: DS.s20),
+
+          // Grid
+          Flexible(
+            child: SingleChildScrollView(
+              child: Wrap(
+                spacing: DS.s8,
+                runSpacing: DS.s8,
+                children: List.generate(questions.length, (i) {
+                  final q = questions[i];
+                  final answered = answers[q.id] != null;
+                  final isMarked = marked.contains(q.id);
+                  final isCurrent = i == currentIdx;
+
+                  Color bg, textC;
+                  if (isCurrent) {
+                    bg = DS.primary;
+                    textC = Colors.white;
+                  } else if (isMarked) {
+                    bg = DS.warning;
+                    textC = Colors.white;
+                  } else if (answered) {
+                    bg = DS.success;
+                    textC = Colors.white;
+                  } else {
+                    bg = DS.surfaceVariant;
+                    textC = DS.textSecondary;
+                  }
+
+                  return GestureDetector(
+                    onTap: () => onTap(i),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: bg,
+                        borderRadius: BorderRadius.circular(DS.radiusSm),
+                        border: Border.all(
+                          color: isCurrent
+                              ? DS.primaryDark
+                              : isMarked
+                              ? DS.warning.withOpacity(0.50)
+                              : answered
+                              ? DS.success.withOpacity(0.40)
+                              : DS.border,
+                          width: isCurrent ? 2 : 1,
+                        ),
+                        boxShadow: isCurrent
+                            ? [
+                                BoxShadow(
+                                  color: DS.primary.withOpacity(0.30),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ]
+                            : [],
+                      ),
+                      child: Center(
+                        child: Text(
+                          '${i + 1}',
+                          style: TextStyle(
+                            color: textC,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: DS.s16),
+          const Divider(color: DS.border, height: 1),
+          const SizedBox(height: DS.s14),
+
+          // Legend
+          Wrap(
+            spacing: DS.s16,
+            runSpacing: DS.s8,
+            children: const [
+              _PaletteLegend(color: DS.primary, label: 'Current'),
+              _PaletteLegend(color: DS.success, label: 'Answered'),
+              _PaletteLegend(color: DS.warning, label: 'Marked'),
+              _PaletteLegend(
+                color: DS.surfaceVariant,
+                label: 'Not visited',
+                textColor: DS.textSecondary,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PaletteLegend extends StatelessWidget {
+  final Color color;
+  final String label;
+  final Color textColor;
+
+  const _PaletteLegend({
+    required this.color,
+    required this.label,
+    this.textColor = Colors.white,
+  });
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Container(
+        width: 16,
+        height: 16,
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(DS.s4),
+          border: Border.all(color: DS.border, width: 1),
+        ),
+      ),
+      const SizedBox(width: DS.s6),
+      Text(
+        label,
+        style: const TextStyle(fontSize: 12, color: DS.textSecondary),
+      ),
+    ],
+  );
+}
+
+// ─────────────────────────────────────────────
+// LEAVE DIALOG
+// ─────────────────────────────────────────────
+class _LeaveDialog extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: DS.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(DS.radiusXl),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(DS.s24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 60,
+              height: 60,
+              decoration: BoxDecoration(
+                color: DS.errorSurface,
+                borderRadius: BorderRadius.circular(DS.radiusMd),
+              ),
+              child: const Icon(
+                Icons.warning_rounded,
+                color: DS.error,
+                size: 30,
+              ),
+            ),
+            const SizedBox(height: DS.s16),
+            const Text(
+              'Leave Test?',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+                color: DS.textPrimary,
+              ),
+            ),
+            const SizedBox(height: DS.s8),
+            const Text(
+              'Your answers will not be saved and your progress will be lost.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: DS.textSecondary,
+                fontSize: 14,
+                height: 1.5,
+              ),
+            ),
+            const SizedBox(height: DS.s24),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(context, false),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: DS.textPrimary,
+                      side: const BorderSide(color: DS.border, width: 1.2),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(DS.radiusMd),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: DS.s12),
+                    ),
+                    child: const Text(
+                      'Stay',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: DS.s12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(context, true),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: DS.error,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(DS.radiusMd),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: DS.s12),
+                      elevation: 0,
+                    ),
+                    child: const Text(
+                      'Leave',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// SUBMIT CONFIRMATION DIALOG
+// ─────────────────────────────────────────────
+class _SubmitDialog extends StatelessWidget {
+  final int answered, total, unanswered, marked;
+
+  const _SubmitDialog({
+    required this.answered,
+    required this.total,
+    required this.unanswered,
+    required this.marked,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: DS.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(DS.radiusXl),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(DS.s24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 60,
+              height: 60,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFFFF8C38), DS.primary],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(DS.radiusMd),
+              ),
+              child: const Icon(
+                Icons.send_rounded,
+                color: Colors.white,
+                size: 28,
+              ),
+            ),
+            const SizedBox(height: DS.s16),
+            const Text(
+              'Submit Test?',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+                color: DS.textPrimary,
+              ),
+            ),
+            const SizedBox(height: DS.s16),
+
+            // Summary
+            Container(
+              padding: const EdgeInsets.all(DS.s14),
+              decoration: BoxDecoration(
+                color: DS.background,
+                borderRadius: BorderRadius.circular(DS.radiusMd),
+                border: Border.all(color: DS.border, width: 1),
+              ),
+              child: Column(
+                children: [
+                  _SummaryRow(
+                    icon: Icons.check_circle_outline_rounded,
+                    color: DS.success,
+                    label: 'Answered',
+                    value: '$answered / $total',
+                  ),
+                  const SizedBox(height: DS.s8),
+                  _SummaryRow(
+                    icon: Icons.radio_button_unchecked_rounded,
+                    color: DS.error,
+                    label: 'Unanswered',
+                    value: '$unanswered',
+                  ),
+                  if (marked > 0) ...[
+                    const SizedBox(height: DS.s8),
+                    _SummaryRow(
+                      icon: Icons.bookmark_rounded,
+                      color: DS.warning,
+                      label: 'Marked for review',
+                      value: '$marked',
+                    ),
+                  ],
+                ],
+              ),
+            ),
+
+            if (unanswered > 0) ...[
+              const SizedBox(height: DS.s12),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: DS.s12,
+                  vertical: DS.s10,
+                ),
+                decoration: BoxDecoration(
+                  color: DS.warningSurface,
+                  borderRadius: BorderRadius.circular(DS.radiusSm),
+                  border: Border.all(color: DS.warning.withOpacity(0.25)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.info_outline_rounded,
+                      color: DS.warning,
+                      size: 15,
+                    ),
+                    const SizedBox(width: DS.s8),
+                    Expanded(
+                      child: Text(
+                        '$unanswered question${unanswered == 1 ? '' : 's'} left unanswered.',
+                        style: const TextStyle(
+                          color: DS.textPrimary,
+                          fontSize: 12.5,
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            const SizedBox(height: DS.s24),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(context, false),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: DS.textPrimary,
+                      side: const BorderSide(color: DS.border, width: 1.2),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(DS.radiusMd),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: DS.s12),
+                    ),
+                    child: const Text(
+                      'Review',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: DS.s12),
+                Expanded(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFFFF8C38), DS.primary],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(DS.radiusMd),
+                      boxShadow: [
+                        BoxShadow(
+                          color: DS.primary.withOpacity(0.28),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.transparent,
+                        shadowColor: Colors.transparent,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(DS.radiusMd),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: DS.s12),
+                      ),
+                      child: const Text(
+                        'Submit',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SummaryRow extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String label, value;
+
+  const _SummaryRow({
+    required this.icon,
+    required this.color,
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      Icon(icon, size: 14, color: color),
+      const SizedBox(width: DS.s8),
+      Text(
+        label,
+        style: const TextStyle(color: DS.textSecondary, fontSize: 13),
+      ),
+      const Spacer(),
+      Text(
+        value,
+        style: TextStyle(
+          color: color,
+          fontSize: 13.5,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    ],
+  );
+}
+
+// ─────────────────────────────────────────────
+// LOADING SCAFFOLD
+// ─────────────────────────────────────────────
+class _LoadingScaffold extends StatelessWidget {
+  final String title;
+  const _LoadingScaffold({required this.title});
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    backgroundColor: DS.background,
+    appBar: AppBar(
+      backgroundColor: DS.surface,
+      elevation: 0,
+      title: Text(
+        title.isEmpty ? 'Loading…' : title,
+        style: const TextStyle(
+          color: DS.textPrimary,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    ),
+    body: const Center(
+      child: CircularProgressIndicator(color: DS.primary, strokeWidth: 2.5),
+    ),
+  );
+}
+
+// ─────────────────────────────────────────────
+// ERROR SCAFFOLD
+// ─────────────────────────────────────────────
+class _ErrorScaffold extends StatelessWidget {
+  final String message;
+  const _ErrorScaffold({required this.message});
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    backgroundColor: DS.background,
+    body: Center(
+      child: Padding(
+        padding: const EdgeInsets.all(DS.s32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                color: DS.errorSurface,
+                borderRadius: BorderRadius.circular(DS.radiusLg),
+              ),
+              child: const Icon(
+                Icons.error_outline_rounded,
+                color: DS.error,
+                size: 36,
+              ),
+            ),
+            const SizedBox(height: DS.s20),
+            const Text(
+              'Failed to Load Test',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                color: DS.textPrimary,
+              ),
+            ),
+            const SizedBox(height: DS.s8),
+            Text(
+              message,
+              style: const TextStyle(
+                color: DS.textSecondary,
+                fontSize: 13.5,
+                height: 1.5,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: DS.s24),
+            OutlinedButton.icon(
+              onPressed: () => context.pop(),
+              icon: const Icon(Icons.arrow_back_rounded, size: 16),
+              label: const Text('Go Back'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: DS.textPrimary,
+                side: const BorderSide(color: DS.border),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(DS.radiusMd),
+                ),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: DS.s20,
+                  vertical: DS.s12,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
