@@ -879,6 +879,19 @@ class _QuestionCard extends StatefulWidget {
 class _QuestionCardState extends State<_QuestionCard> {
   bool _expanded = false;
 
+  static final _tagRe = RegExp(r'<[^>]+>');
+
+  String _stripHtml(String html) => html
+      .replaceAll(_tagRe, ' ')
+      .replaceAll('&amp;', '&')
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>')
+      .replaceAll('&nbsp;', ' ')
+      .replaceAll('&quot;', '"')
+      .replaceAll('&#39;', "'")
+      .replaceAll(RegExp(r' {2,}'), ' ')
+      .trim();
+
   bool get _skipped => widget.picked == null;
   bool get _correct {
     if (_skipped) return false;
@@ -1282,7 +1295,7 @@ class _QuestionCardState extends State<_QuestionCard> {
                               ),
                               const SizedBox(height: DS.s4),
                               Text(
-                                q.explanation!,
+                                _stripHtml(q.explanation!),
                                 style: const TextStyle(
                                   color: DS.textPrimary,
                                   fontSize: 13,

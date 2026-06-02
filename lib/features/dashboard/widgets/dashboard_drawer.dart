@@ -58,7 +58,8 @@ class _DrawerSection {
 // DASHBOARD DRAWER
 // ─────────────────────────────────────────────
 class DashboardDrawer extends StatefulWidget {
-  const DashboardDrawer({super.key});
+  final bool fromRight;
+  const DashboardDrawer({super.key, this.fromRight = false});
 
   @override
   State<DashboardDrawer> createState() => _DashboardDrawerState();
@@ -225,19 +226,25 @@ class _DashboardDrawerState extends State<DashboardDrawer>
 
   @override
   Widget build(BuildContext context) {
+    final fromRight = widget.fromRight;
     return Drawer(
       backgroundColor: DS.background,
       width: 290,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.only(
-          topRight: Radius.circular(DS.radiusXl),
-          bottomRight: Radius.circular(DS.radiusXl),
-        ),
+      shape: RoundedRectangleBorder(
+        borderRadius: fromRight
+            ? const BorderRadius.only(
+                topLeft: Radius.circular(DS.radiusXl),
+                bottomLeft: Radius.circular(DS.radiusXl),
+              )
+            : const BorderRadius.only(
+                topRight: Radius.circular(DS.radiusXl),
+                bottomRight: Radius.circular(DS.radiusXl),
+              ),
       ),
       child: Column(
         children: [
           // ── Orange branded header ──
-          _DrawerHeader(),
+          _DrawerHeader(fromRight: fromRight),
 
           // ── Scrollable nav sections ──
           Expanded(
@@ -312,17 +319,22 @@ class _DashboardDrawerState extends State<DashboardDrawer>
 // DRAWER HEADER
 // ─────────────────────────────────────────────
 class _DrawerHeader extends StatelessWidget {
+  final bool fromRight;
+  const _DrawerHeader({this.fromRight = false});
+
   @override
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
           colors: [Color(0xFFFF8C38), DS.primary],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.only(topRight: Radius.circular(DS.radiusXl)),
+        borderRadius: fromRight
+            ? const BorderRadius.only(topLeft: Radius.circular(DS.radiusXl))
+            : const BorderRadius.only(topRight: Radius.circular(DS.radiusXl)),
       ),
       child: SafeArea(
         bottom: false,

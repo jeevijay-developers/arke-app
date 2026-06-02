@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../core/theme/colors.dart';
 import '../auth/data/auth_repository.dart';
+import '../dashboard/widgets/dashboard_drawer.dart';
 import '../profile/data/profile_providers.dart';
 
 // ─────────────────────────────────────────────
@@ -42,11 +42,18 @@ abstract class DS {
 // ─────────────────────────────────────────────
 // HOME SHELL
 // ─────────────────────────────────────────────
-class HomeShell extends ConsumerWidget {
+class HomeShell extends ConsumerStatefulWidget {
   final Widget child;
   final String location;
 
   const HomeShell({super.key, required this.child, required this.location});
+
+  @override
+  ConsumerState<HomeShell> createState() => _HomeShellState();
+}
+
+class _HomeShellState extends ConsumerState<HomeShell> {
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
 
   static const _tabs = [
     (
@@ -82,11 +89,18 @@ class HomeShell extends ConsumerWidget {
   ];
 
   int get _index => _tabs
-      .indexWhere((t) => location.startsWith(t.route))
+      .indexWhere((t) => widget.location.startsWith(t.route))
       .clamp(0, _tabs.length - 1);
 
+  String _initials(String name) {
+    final parts = name.trim().split(' ').where((p) => p.isNotEmpty).toList();
+    if (parts.isEmpty) return 'L';
+    if (parts.length == 1) return parts[0][0].toUpperCase();
+    return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+  }
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final user = ref.watch(authRepositoryProvider).currentUser();
     final profile = ref.watch(userProfileProvider).valueOrNull;
     final displayName = profile?.fullName?.trim().isNotEmpty == true
@@ -101,23 +115,26 @@ class HomeShell extends ConsumerWidget {
         statusBarIconBrightness: Brightness.dark,
       ),
       child: PopScope(
-        canPop: location == '/home',
-        onPopInvoked: (didPop) {
-          if (!didPop && location != '/home') {
+        canPop: widget.location == '/home',
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop && widget.location != '/home') {
             context.go('/home');
           }
         },
         child: Scaffold(
+          key: _scaffoldKey,
           backgroundColor: DS.background,
+          endDrawer: const DashboardDrawer(fromRight: true),
 
           // ── Top App Bar ──
           appBar: _AppBar(
             displayName: displayName,
             initials: initials,
             onNotifications: () => context.push('/notifications'),
+            onOpenDrawer: () => _scaffoldKey.currentState!.openEndDrawer(),
           ),
 
-          body: child,
+          body: widget.child,
 
           // ── Bottom Navigation ──
           bottomNavigationBar: _BottomNav(
@@ -132,13 +149,6 @@ class HomeShell extends ConsumerWidget {
       ),
     );
   }
-
-  String _initials(String name) {
-    final parts = name.trim().split(' ').where((p) => p.isNotEmpty).toList();
-    if (parts.isEmpty) return 'L';
-    if (parts.length == 1) return parts[0][0].toUpperCase();
-    return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
-  }
 }
 
 // ─────────────────────────────────────────────
@@ -148,11 +158,13 @@ class _AppBar extends StatelessWidget implements PreferredSizeWidget {
   final String displayName;
   final String initials;
   final VoidCallback onNotifications;
+  final VoidCallback onOpenDrawer;
 
   const _AppBar({
     required this.displayName,
     required this.initials,
     required this.onNotifications,
+    required this.onOpenDrawer,
   });
 
   @override
@@ -240,6 +252,8 @@ class _AppBar extends StatelessWidget implements PreferredSizeWidget {
 
               // ── Action buttons ──
               _NotificationButton(onTap: onNotifications),
+              const SizedBox(width: DS.s8),
+              _HamburgerButton(onTap: onOpenDrawer),
             ],
           ),
         ),
@@ -252,6 +266,38 @@ class _AppBar extends StatelessWidget implements PreferredSizeWidget {
     if (hour < 12) return 'Good morning ☀️';
     if (hour < 17) return 'Good afternoon 👋';
     return 'Good evening 🌙';
+  }
+}
+
+// ─────────────────────────────────────────────
+// HAMBURGER BUTTON (student dashboard)
+// ─────────────────────────────────────────────
+class _HamburgerButton extends StatelessWidget {
+  final VoidCallback onTap;
+  const _HamburgerButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'My Dashboard',
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            color: DS.surfaceVariant,
+            borderRadius: BorderRadius.circular(DS.radiusSm),
+            border: Border.all(color: DS.border, width: 1),
+          ),
+          child: const Icon(
+            Icons.menu_rounded,
+            size: 18,
+            color: DS.textSecondary,
+          ),
+        ),
+      ),
+    );
   }
 }
 

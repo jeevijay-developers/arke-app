@@ -98,6 +98,15 @@ class MathText extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────
+// MATCH PAIR — one row in a match-the-column question
+// ─────────────────────────────────────────────
+class MatchPair {
+  final String key;   // e.g. "A", "B"
+  final String value; // e.g. "CH₄"
+  const MatchPair({required this.key, required this.value});
+}
+
+// ─────────────────────────────────────────────
 // OPTION ITEM — text + optional image URL
 // ─────────────────────────────────────────────
 class OptionItem {
@@ -133,13 +142,19 @@ class TestQuestion {
   final String subject;
   final String? explanation;
   final bool hasHtml;
-  final String questionType; // 'mcq', 'integer', 'fill_in_the_blank', etc.
+  final String questionType; // 'mcq', 'integer', 'fill_in_the_blank', 'match_column', etc.
+  final List<MatchPair> matchCol1;
+  final List<MatchPair> matchCol2;
+
+  bool get isMatchType => questionType == 'match_column' || questionType == 'match';
 
   bool get isIntegerType =>
-      questionType == 'integer' ||
-      questionType == 'fill_in_the_blank' ||
-      questionType == 'numerical' ||
-      options.isEmpty; // no options in DB → treat as fill-in
+      !isMatchType && (
+        questionType == 'integer' ||
+        questionType == 'fill_in_the_blank' ||
+        questionType == 'numerical' ||
+        options.isEmpty
+      );
 
   const TestQuestion({
     required this.id,
@@ -152,15 +167,45 @@ class TestQuestion {
     required this.hasHtml,
     required this.questionType,
     this.explanation,
+    this.matchCol1 = const [],
+    this.matchCol2 = const [],
   });
 
   factory TestQuestion.fromJson(Map<String, dynamic> j) {
     final rawOpts = j['options'];
     List<OptionItem> opts = [];
-    if (rawOpts is List && rawOpts.isNotEmpty) {
+    List<MatchPair> matchCol1 = [];
+    List<MatchPair> matchCol2 = [];
+
+    if (rawOpts is Map) {
+      // match_column: {"col1": [{key, value}...], "col2": [{key, value}...]}
+      List<MatchPair> parsePairs(dynamic list) {
+        if (list is! List) return [];
+        return list.map((e) {
+          if (e is Map) {
+            return MatchPair(
+              key: (e['key'] ?? '').toString(),
+              value: (e['value'] ?? '').toString(),
+            );
+          }
+          return MatchPair(key: '', value: e.toString());
+        }).toList();
+      }
+      matchCol1 = parsePairs(rawOpts['col1']);
+      matchCol2 = parsePairs(rawOpts['col2']);
+    } else if (rawOpts is List && rawOpts.isNotEmpty) {
       opts = rawOpts.map((e) {
-        final raw = e is Map ? (e['text'] ?? e['value'] ?? '').toString() : e.toString();
-        return OptionItem.fromRaw(raw);
+        if (e is Map) {
+          final raw = (e['text'] ?? e['value'] ?? '').toString();
+          // Prefer a dedicated image key over extracting from HTML
+          final directImage = (e['image'] ?? e['image_url'] ?? e['imageUrl'] ?? '') as String;
+          if (directImage.isNotEmpty) {
+            final parsed = OptionItem.fromRaw(raw);
+            return OptionItem(text: parsed.text, imageUrl: directImage);
+          }
+          return OptionItem.fromRaw(raw);
+        }
+        return OptionItem.fromRaw(e.toString());
       }).toList();
     }
 
@@ -226,6 +271,8 @@ class TestQuestion {
       explanation: j['explanation'] as String?,
       hasHtml: hasHtml,
       questionType: questionType,
+      matchCol1: matchCol1,
+      matchCol2: matchCol2,
     );
   }
 }
@@ -321,7 +368,6 @@ class _TestEngineScreenState extends State<TestEngineScreen>
       }
 
       _answers = {for (final q in _questions) q.id: null};
-      // Create a TextEditingController for every integer/fill-in question
       for (final q in _questions) {
         if (q.isIntegerType) {
           final ctrl = TextEditingController();
@@ -330,6 +376,9 @@ class _TestEngineScreenState extends State<TestEngineScreen>
             _answers[q.id] = val.isEmpty ? null : val;
           });
           _intCtrls[q.id] = ctrl;
+        } else if (q.isMatchType) {
+          // Pre-populate with null selections for each col1 row
+          _answers[q.id] = <String, String?>{for (final p in q.matchCol1) p.key: null};
         }
       }
       _remaining = _durationSeconds;
@@ -369,12 +418,29 @@ class _TestEngineScreenState extends State<TestEngineScreen>
   }
 
   // ── Derived stats ──
-  int get _answeredCount => _answers.values.where((v) => v != null).length;
+  int get _answeredCount {
+    int count = 0;
+    for (final q in _questions) {
+      final ans = _answers[q.id];
+      if (q.isMatchType) {
+        // Answered when every col1 row has a selection
+        if (ans is Map && ans.values.every((v) => v != null)) count++;
+      } else if (ans != null) {
+        count++;
+      }
+    }
+    return count;
+  }
+
   int get _markedCount => _marked.length;
 
   bool _isCorrect(TestQuestion q) {
     final ans = _answers[q.id];
     if (ans == null) return false;
+    if (q.isMatchType) {
+      // We don't auto-grade match questions — mark as answered but not graded
+      return false;
+    }
     if (q.isIntegerType) {
       return ans.toString().trim() == q.correctAnswerText.trim();
     }
@@ -541,8 +607,23 @@ class _TestEngineScreenState extends State<TestEngineScreen>
 
                       const SizedBox(height: DS.s16),
 
-                      // Options / integer input
-                      if (q.isIntegerType && _intCtrls[q.id] != null)
+                      // Options / integer input / match-the-column
+                      if (q.isMatchType)
+                        _MatchColumnWidget(
+                          question: q,
+                          selections: (_answers[q.id] as Map?)?.cast<String, String?>() ?? {},
+                          onChanged: (col1Key, col2Key) {
+                            HapticFeedback.selectionClick();
+                            setState(() {
+                              final current = Map<String, String?>.from(
+                                (_answers[q.id] as Map?)?.cast<String, String?>() ?? {},
+                              );
+                              current[col1Key] = col2Key;
+                              _answers[q.id] = current;
+                            });
+                          },
+                        )
+                      else if (q.isIntegerType && _intCtrls[q.id] != null)
                         _IntegerAnswerField(
                           controller: _intCtrls[q.id]!,
                         )
@@ -1196,6 +1277,237 @@ class _IntegerAnswerField extends StatelessWidget {
 // ─────────────────────────────────────────────
 // OPTION TILE
 // ─────────────────────────────────────────────
+// ─────────────────────────────────────────────
+// MATCH-THE-COLUMN WIDGET
+// ─────────────────────────────────────────────
+class _MatchColumnWidget extends StatelessWidget {
+  final TestQuestion question;
+  final Map<String, String?> selections; // col1 key → selected col2 key
+  final void Function(String col1Key, String? col2Key) onChanged;
+
+  const _MatchColumnWidget({
+    required this.question,
+    required this.selections,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final col2Keys = question.matchCol2.map((p) => p.key).toList();
+
+    return Container(
+      decoration: BoxDecoration(
+        color: DS.surface,
+        borderRadius: BorderRadius.circular(DS.radiusMd),
+        border: Border.all(color: DS.border, width: 1.2),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          // Header row
+          Container(
+            color: DS.surfaceVariant,
+            padding: const EdgeInsets.symmetric(
+              horizontal: DS.s16,
+              vertical: DS.s10,
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  flex: 5,
+                  child: Text(
+                    'COLUMN I',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: DS.primary,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: DS.s8),
+                SizedBox(
+                  width: 130,
+                  child: Text(
+                    'COLUMN II',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: DS.primary,
+                      letterSpacing: 0.8,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const Divider(height: 1, color: DS.border),
+
+          // One row per col1 item
+          ...question.matchCol1.asMap().entries.map((entry) {
+            final idx = entry.key;
+            final pair = entry.value;
+            final selected = selections[pair.key];
+            final isLast = idx == question.matchCol1.length - 1;
+
+            return Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: DS.s16,
+                    vertical: DS.s10,
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      // Col1 label badge
+                      Container(
+                        width: 28,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          color: DS.primaryLight,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: DS.primary, width: 1.2),
+                        ),
+                        child: Center(
+                          child: Text(
+                            pair.key,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              color: DS.primaryDark,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: DS.s10),
+                      // Col1 value
+                      Expanded(
+                        flex: 5,
+                        child: MathText(
+                          pair.value,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            color: DS.textPrimary,
+                            height: 1.4,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: DS.s8),
+                      // Dropdown for col2 selection
+                      Container(
+                        width: 130,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: selected != null ? DS.primaryLight : DS.surfaceVariant,
+                          borderRadius: BorderRadius.circular(DS.radiusSm),
+                          border: Border.all(
+                            color: selected != null ? DS.primary : DS.border,
+                            width: selected != null ? 1.5 : 1.0,
+                          ),
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            value: selected,
+                            isExpanded: true,
+                            icon: const Icon(
+                              Icons.keyboard_arrow_down_rounded,
+                              color: DS.textSecondary,
+                              size: 18,
+                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: DS.s8),
+                            hint: Text(
+                              '— select —',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: DS.textHint,
+                              ),
+                            ),
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: DS.primaryDark,
+                            ),
+                            dropdownColor: DS.surface,
+                            borderRadius: BorderRadius.circular(DS.radiusSm),
+                            items: col2Keys.map((k) {
+                              final label = question.matchCol2
+                                  .firstWhere((p) => p.key == k)
+                                  .key;
+                              return DropdownMenuItem(
+                                value: k,
+                                child: Text(label),
+                              );
+                            }).toList(),
+                            onChanged: (val) => onChanged(pair.key, val),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (!isLast) const Divider(height: 1, color: DS.border),
+              ],
+            );
+          }),
+
+          // Col2 reference list at the bottom
+          const Divider(height: 1, color: DS.border),
+          Container(
+            color: DS.surfaceVariant,
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(
+              horizontal: DS.s16,
+              vertical: DS.s10,
+            ),
+            child: Wrap(
+              spacing: DS.s16,
+              runSpacing: DS.s6,
+              children: question.matchCol2.map((p) {
+                return Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 24,
+                      height: 24,
+                      decoration: BoxDecoration(
+                        color: DS.indigoLight,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: DS.indigo, width: 1.0),
+                      ),
+                      child: Center(
+                        child: Text(
+                          p.key,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            color: DS.indigo,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: DS.s6),
+                    MathText(
+                      p.value,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: DS.textPrimary,
+                      ),
+                    ),
+                  ],
+                );
+              }).toList(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
 class _OptionTile extends StatelessWidget {
   final int index;
   final OptionItem option;
@@ -1361,7 +1673,7 @@ class _BottomNav extends StatelessWidget {
         border: Border(top: BorderSide(color: DS.border, width: 1)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 12,
             offset: const Offset(0, -3),
           ),
@@ -1414,8 +1726,8 @@ class _BottomNav extends StatelessWidget {
                     ? []
                     : [
                         BoxShadow(
-                          color: (isLast ? DS.success : DS.primary).withOpacity(
-                            0.28,
+                          color: (isLast ? DS.success : DS.primary).withValues(
+                            alpha: 0.28,
                           ),
                           blurRadius: 10,
                           offset: const Offset(0, 4),
@@ -1620,16 +1932,16 @@ class _PaletteSheet extends StatelessWidget {
                           color: isCurrent
                               ? DS.primaryDark
                               : isMarked
-                              ? DS.warning.withOpacity(0.50)
+                              ? DS.warning.withValues(alpha: 0.50)
                               : answered
-                              ? DS.success.withOpacity(0.40)
+                              ? DS.success.withValues(alpha: 0.40)
                               : DS.border,
                           width: isCurrent ? 2 : 1,
                         ),
                         boxShadow: isCurrent
                             ? [
                                 BoxShadow(
-                                  color: DS.primary.withOpacity(0.30),
+                                  color: DS.primary.withValues(alpha: 0.30),
                                   blurRadius: 8,
                                   offset: const Offset(0, 2),
                                 ),
@@ -1906,7 +2218,7 @@ class _SubmitDialog extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: DS.warningSurface,
                   borderRadius: BorderRadius.circular(DS.radiusSm),
-                  border: Border.all(color: DS.warning.withOpacity(0.25)),
+                  border: Border.all(color: DS.warning.withValues(alpha: 0.25)),
                 ),
                 child: Row(
                   children: [
@@ -1963,7 +2275,7 @@ class _SubmitDialog extends StatelessWidget {
                       borderRadius: BorderRadius.circular(DS.radiusMd),
                       boxShadow: [
                         BoxShadow(
-                          color: DS.primary.withOpacity(0.28),
+                          color: DS.primary.withValues(alpha: 0.28),
                           blurRadius: 10,
                           offset: const Offset(0, 4),
                         ),

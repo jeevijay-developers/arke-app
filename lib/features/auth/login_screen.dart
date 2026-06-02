@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/error/app_exception.dart';
 import 'data/auth_repository.dart';
 import 'widgets/google_email_sheet.dart';
@@ -209,6 +210,43 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                 ),
               ),
             ],
+          ),
+
+          // ── Help button — top-right corner ──
+          SafeArea(
+            child: Align(
+              alignment: Alignment.topRight,
+              child: Padding(
+                padding: const EdgeInsets.only(top: DS.s8, right: DS.s16),
+                child: TextButton(
+                  onPressed: () => launchUrl(
+                    Uri.parse('https://www.arke.pro/contact'),
+                    mode: LaunchMode.externalApplication,
+                  ),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    backgroundColor: Colors.white.withValues(alpha: 0.15),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: DS.s16,
+                      vertical: DS.s8,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(DS.radiusSm),
+                      side: BorderSide(
+                        color: Colors.white.withValues(alpha: 0.3),
+                      ),
+                    ),
+                  ),
+                  child: const Text(
+                    'Help',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ),
           ),
         ],
       ),
