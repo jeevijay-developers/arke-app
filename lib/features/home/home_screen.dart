@@ -105,7 +105,7 @@ class HomeScreen extends ConsumerWidget {
                         child: _ContinueCard(
                           enrollment: last,
                           onResume: () =>
-                              context.push('/course-player/${last.courseId}'),
+                              context.push('/my-courses/${last.courseId}'),
                         ),
                       );
                     },
@@ -700,13 +700,16 @@ class _CourseTile extends StatelessWidget {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    CachedNetworkImage(
-                      imageUrl: course.thumbnailUrl,
-                      fit: BoxFit.cover,
-                      placeholder: (_, _) =>
-                          Container(color: DS.surfaceVariant),
-                    ),
-                    if (course.isFree)
+                    if (course.thumbnailUrl != null && course.thumbnailUrl!.isNotEmpty)
+                      CachedNetworkImage(
+                        imageUrl: course.thumbnailUrl!,
+                        fit: BoxFit.cover,
+                        errorWidget: (_, __, ___) =>
+                            Container(color: DS.surfaceVariant),
+                      )
+                    else
+                      Container(color: DS.surfaceVariant),
+                    if (course.isCourseFree)
                       Positioned(
                         top: DS.s8,
                         left: DS.s8,
@@ -741,7 +744,7 @@ class _CourseTile extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      course.title,
+                      course.name,
                       style: const TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
@@ -754,7 +757,7 @@ class _CourseTile extends StatelessWidget {
                     ),
                     const SizedBox(height: DS.s4),
                     Text(
-                      course.educator,
+                      course.teacherName ?? '',
                       style: const TextStyle(
                         fontSize: 11.5,
                         color: DS.textSecondary,
@@ -772,7 +775,7 @@ class _CourseTile extends StatelessWidget {
                         ),
                         const SizedBox(width: DS.s4),
                         Text(
-                          course.rating.toStringAsFixed(1),
+                          '4.5',
                           style: const TextStyle(
                             fontSize: 11.5,
                             fontWeight: FontWeight.w600,
@@ -781,9 +784,9 @@ class _CourseTile extends StatelessWidget {
                         ),
                         const Spacer(),
                         Text(
-                          course.isFree
+                          course.isCourseFree
                               ? 'Free'
-                              : '₹${course.price.toStringAsFixed(0)}',
+                              : '₹${course.displayPrice.toStringAsFixed(0)}',
                           style: const TextStyle(
                             color: DS.primary,
                             fontWeight: FontWeight.w800,

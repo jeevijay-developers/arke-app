@@ -11,8 +11,10 @@ import '../../features/auth/login_screen.dart';
 import '../../features/auth/signup_screen.dart';
 import '../../features/auth/widgets/student_gate.dart';
 import '../../features/courses/course_detail_screen.dart';
+import '../../features/courses/course_home_screen.dart';
 import '../../features/courses/course_player_screen.dart';
 import '../../features/courses/courses_list_screen.dart';
+import '../../features/courses/folder_view_screen.dart';
 import '../../features/courses/lecture_player_screen.dart';
 import '../../features/dashboard/student_dashboard_screen.dart';
 import '../../features/dashboard/doubts_screen.dart';
@@ -129,6 +131,31 @@ final routerProvider = Provider<GoRouter>((ref) {
         parentNavigatorKey: _rootKey,
         builder: (_, s) =>
             CourseDetailScreen(courseId: s.pathParameters['id']!),
+      ),
+      GoRoute(
+        path: '/my-courses/:courseId',
+        parentNavigatorKey: _rootKey,
+        builder: (_, s) =>
+            CourseHomeScreen(courseId: s.pathParameters['courseId']!),
+      ),
+      GoRoute(
+        path: '/my-courses/:courseId/folder/:folderId',
+        parentNavigatorKey: _rootKey,
+        builder: (_, s) => FolderViewScreen(
+          courseId: s.pathParameters['courseId']!,
+          folderId: s.pathParameters['folderId']!,
+          folderName: s.extra as String? ?? 'Folder',
+        ),
+      ),
+      GoRoute(
+        path: '/my-courses/:courseId/folder/:folderId/sub/:subFolderId',
+        parentNavigatorKey: _rootKey,
+        builder: (_, s) => SubFolderViewScreen(
+          courseId: s.pathParameters['courseId']!,
+          folderId: s.pathParameters['folderId']!,
+          subFolderId: s.pathParameters['subFolderId']!,
+          subFolderName: s.extra as String? ?? 'Sub-folder',
+        ),
       ),
       GoRoute(
         path: '/course-player/:id',

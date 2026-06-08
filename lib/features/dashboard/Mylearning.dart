@@ -85,7 +85,7 @@ class MyLearningScreen extends ConsumerWidget {
                 onBrowse: () => context.go('/courses'),
                 onBack: () => context.pop(),
                 onCardTap: (courseId) =>
-                    context.push('/course-player/$courseId'),
+                    context.push('/my-courses/$courseId'),
               ),
       ),
     );

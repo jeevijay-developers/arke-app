@@ -10,9 +10,3 @@ final enrollmentsProvider = FutureProvider.autoDispose<List<Enrollment>>((ref) a
   final repo = ref.watch(enrollmentsRepositoryProvider);
   return repo.fetchMyEnrollments();
 });
-
-// Returns true if the current user is enrolled in the given course.
-final isEnrolledProvider = FutureProvider.autoDispose.family<bool, String>((ref, courseId) async {
-  final enrollments = await ref.watch(enrollmentsProvider.future);
-  return enrollments.any((e) => e.courseId == courseId);
-});

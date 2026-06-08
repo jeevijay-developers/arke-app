@@ -14,11 +14,13 @@ class CoursesRepository {
       final data = await _client
           .from('courses')
           .select(
-            'id, name, educator_name, subject, thumbnail_url, rating, price, '
-            'description, level, badge, total_enrolled, total_lessons, duration_hours',
+            'id, name, internal_name, description, thumbnail_url, target, "class", '
+            'language, mrp, sale_price, discount_percent, show_price_with_gst, '
+            'is_course_free, max_usage_days, course_end_date, priority, badge, '
+            'is_active, assigned_teacher_id, what_youll_learn, requirements',
           )
-          .eq('is_published', true)
-          .order('name');
+          .eq('is_active', true)
+          .order('priority');
       return (data as List<dynamic>)
           .map((row) => Course.fromJson(row as Map<String, dynamic>))
           .toList();

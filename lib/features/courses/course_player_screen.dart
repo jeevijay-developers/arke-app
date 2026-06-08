@@ -6,7 +6,6 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:video_player/video_player.dart';
 
-import '../enrollments/data/enrollments_providers.dart';
 import 'data/courses_providers.dart';
 import 'data/models/chapter.dart';
 import 'data/models/lesson.dart';
@@ -194,7 +193,7 @@ class _CoursePlayerScreenState extends ConsumerState<CoursePlayerScreen>
       }
     });
 
-    final courseTitle = courseAsync.valueOrNull?.title ?? 'Course';
+    final courseTitle = courseAsync.valueOrNull?.name ?? 'Course';
     final activeLesson = lessonsAsync.valueOrNull
         ?.where((l) => l.id == _activeLessonId)
         .firstOrNull;
@@ -1128,19 +1127,9 @@ class _InfoTab extends StatelessWidget {
             spacing: DS.s8,
             runSpacing: DS.s8,
             children: [
-              _InfoChip(Icons.person_outline_rounded, course.educator),
-              if (course.level != null)
-                _InfoChip(Icons.bar_chart_rounded, course.level!),
-              if (course.totalLessons != null)
-                _InfoChip(
-                  Icons.play_lesson_outlined,
-                  '${course.totalLessons} lessons',
-                ),
-              if (course.durationHours != null)
-                _InfoChip(
-                  Icons.access_time_rounded,
-                  '${course.durationHours}h total',
-                ),
+              _InfoChip(Icons.person_outline_rounded, course.teacherName ?? 'Instructor'),
+              _InfoChip(Icons.bar_chart_rounded, course.courseClass),
+              _InfoChip(Icons.flag_outlined, course.target),
               _InfoChip(
                 Icons.workspace_premium_outlined,
                 'Certificate on completion',

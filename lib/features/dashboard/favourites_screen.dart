@@ -358,9 +358,9 @@ class _FavouriteCourseCard extends StatelessWidget {
                     child: SizedBox(
                       width: 90,
                       height: 72,
-                      child: course.thumbnailUrl.isNotEmpty
+                      child: (course.thumbnailUrl ?? '').isNotEmpty
                           ? CachedNetworkImage(
-                              imageUrl: course.thumbnailUrl,
+                              imageUrl: course.thumbnailUrl!,
                               fit: BoxFit.cover,
                               placeholder: (_, __) =>
                                   Container(color: DS.primaryLight),
@@ -402,7 +402,7 @@ class _FavouriteCourseCard extends StatelessWidget {
                             borderRadius: BorderRadius.circular(999),
                           ),
                           child: Text(
-                            course.subject.toUpperCase(),
+                            course.target.toUpperCase(),
                             style: TextStyle(
                               color: _accent,
                               fontSize: 9.5,
@@ -415,7 +415,7 @@ class _FavouriteCourseCard extends StatelessWidget {
 
                         // Title
                         Text(
-                          course.title,
+                          course.name,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -439,7 +439,7 @@ class _FavouriteCourseCard extends StatelessWidget {
                             const SizedBox(width: DS.s4),
                             Expanded(
                               child: Text(
-                                course.educator,
+                                course.teacherName ?? '',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
@@ -455,17 +455,17 @@ class _FavouriteCourseCard extends StatelessWidget {
                                 vertical: DS.s2,
                               ),
                               decoration: BoxDecoration(
-                                color: course.isFree
+                                color: course.isCourseFree
                                     ? DS.successSurface
                                     : DS.primaryLight,
                                 borderRadius: BorderRadius.circular(999),
                               ),
                               child: Text(
-                                course.isFree
+                                course.isCourseFree
                                     ? 'Free'
-                                    : '₹${course.price.toStringAsFixed(0)}',
+                                    : '₹${course.displayPrice.toStringAsFixed(0)}',
                                 style: TextStyle(
-                                  color: course.isFree
+                                  color: course.isCourseFree
                                       ? DS.success
                                       : DS.primary,
                                   fontSize: 11.5,

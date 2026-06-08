@@ -50,10 +50,10 @@ class Enrollment {
       isActive: json['is_active'] as bool? ?? true,
       createdAt: DateTime.parse(json['created_at'] as String),
       courseTitle: course?['name'] as String?,
-      courseSubject: course?['subject'] as String?,
+      courseSubject: course?['target'] as String?,
       courseThumbnailUrl: course?['thumbnail_url'] as String?,
-      courseEducatorName: course?['educator_name'] as String?,
-      courseTotalLessons: course?['total_lessons'] as int?,
+      courseEducatorName: course?['teacher_name'] as String?,
+      courseTotalLessons: null,
     );
   }
 }

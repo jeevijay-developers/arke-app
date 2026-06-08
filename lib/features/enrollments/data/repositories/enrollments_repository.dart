@@ -13,13 +13,18 @@ class EnrollmentsRepository {
     try {
       final userId = _client.auth.currentUser?.id;
       if (userId == null) throw const UnauthorizedException();
-      await _client.from('enrollments').upsert({
+      // Use insert with ignoreDuplicates — more reliable than upsert with RLS
+      await _client.from('enrollments').insert({
         'user_id': userId,
         'course_id': courseId,
         'is_active': true,
         'progress_percent': 0,
         'completed_lessons': 0,
-      }, onConflict: 'user_id,course_id');
+      });
+    } on PostgrestException catch (e) {
+      // Duplicate key (already enrolled) — not an error
+      if (e.code == '23505') return;
+      throw AppException.from(e);
     } catch (e) {
       throw AppException.from(e);
     }
@@ -34,7 +39,7 @@ class EnrollmentsRepository {
           .select(
             'id, user_id, course_id, progress_percent, completed_lessons, '
             'last_lesson_title, last_accessed_at, is_active, created_at, '
-            'courses(name, subject, thumbnail_url, educator_name, total_lessons)',
+            'courses(name, target, thumbnail_url)',
           )
           .eq('user_id', userId)
           .eq('is_active', true)

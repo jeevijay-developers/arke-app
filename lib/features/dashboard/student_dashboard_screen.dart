@@ -1702,9 +1702,9 @@ class _RecommendedTile extends StatelessWidget {
                 children: [
                   AspectRatio(
                     aspectRatio: 16 / 10,
-                    child: course.thumbnailUrl.isNotEmpty
+                    child: (course.thumbnailUrl ?? '').isNotEmpty
                         ? CachedNetworkImage(
-                            imageUrl: course.thumbnailUrl,
+                            imageUrl: course.thumbnailUrl!,
                             fit: BoxFit.cover,
                             placeholder: (_, __) =>
                                 Container(color: DS.primaryLight),
@@ -1717,7 +1717,7 @@ class _RecommendedTile extends StatelessWidget {
                             ),
                           ),
                   ),
-                  if (course.isFree)
+                  if (course.isCourseFree)
                     Positioned(
                       top: DS.s6,
                       left: DS.s6,
@@ -1752,7 +1752,7 @@ class _RecommendedTile extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      course.title,
+                      course.name,
                       style: const TextStyle(
                         color: DS.textPrimary,
                         fontSize: 13,
@@ -1764,7 +1764,7 @@ class _RecommendedTile extends StatelessWidget {
                     ),
                     const SizedBox(height: DS.s4),
                     Text(
-                      course.educator,
+                      course.teacherName ?? '',
                       style: const TextStyle(
                         color: DS.textSecondary,
                         fontSize: 11,
@@ -1782,7 +1782,7 @@ class _RecommendedTile extends StatelessWidget {
                         ),
                         const SizedBox(width: DS.s2),
                         Text(
-                          course.rating.toStringAsFixed(1),
+                          '4.5',
                           style: const TextStyle(
                             fontSize: 11.5,
                             fontWeight: FontWeight.w600,
@@ -1791,9 +1791,9 @@ class _RecommendedTile extends StatelessWidget {
                         ),
                         const Spacer(),
                         Text(
-                          course.isFree
+                          course.isCourseFree
                               ? 'Free'
-                              : '₹${course.price.toStringAsFixed(0)}',
+                              : '₹${course.displayPrice.toStringAsFixed(0)}',
                           style: const TextStyle(
                             color: DS.primary,
                             fontWeight: FontWeight.w800,

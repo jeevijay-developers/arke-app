@@ -2,73 +2,103 @@ import 'package:equatable/equatable.dart';
 
 class Course extends Equatable {
   final String id;
-  final String title;
-  final String educator;
-  final String subject;
-  final String thumbnailUrl;
-  final double rating;
-  final double price;
+  final String name;
+  final String? internalName;
   final String? description;
-  final String? level;
+  final String? thumbnailUrl;
+  final String target;       // 'IIT-JEE' | 'NEET' | 'Foundation'
+  final String courseClass;  // '8'..'12' | '12th_pass'
+  final String language;     // 'Hindi' | 'English'
+  final double mrp;
+  final double salePrice;
+  final double discountPercent;
+  final bool showPriceWithGst;
+  final bool isCourseFree;
+  final int? maxUsageDays;
+  final DateTime? courseEndDate;
+  final int priority;
   final String? badge;
-  final int? totalEnrolled;
-  final int? totalLessons;
-  final int? durationHours;
+  final bool isActive;
+  final String? assignedTeacherId;
   final List<String> whatYoullLearn;
   final List<String> requirements;
 
+  // Joined teacher name (from profiles/teachers table if joined)
+  final String? teacherName;
+
   const Course({
     required this.id,
-    required this.title,
-    required this.educator,
-    required this.subject,
-    required this.thumbnailUrl,
-    required this.rating,
-    required this.price,
+    required this.name,
+    this.internalName,
     this.description,
-    this.level,
+    this.thumbnailUrl,
+    required this.target,
+    required this.courseClass,
+    this.language = 'Hindi',
+    this.mrp = 0,
+    this.salePrice = 0,
+    this.discountPercent = 0,
+    this.showPriceWithGst = false,
+    this.isCourseFree = false,
+    this.maxUsageDays,
+    this.courseEndDate,
+    this.priority = 0,
     this.badge,
-    this.totalEnrolled,
-    this.totalLessons,
-    this.durationHours,
+    this.isActive = true,
+    this.assignedTeacherId,
     this.whatYoullLearn = const [],
     this.requirements = const [],
+    this.teacherName,
   });
 
-  bool get isFree => price == 0;
+  double get displayPrice =>
+      showPriceWithGst ? salePrice * 1.18 : salePrice;
 
-  factory Course.fromJson(Map<String, dynamic> json) => Course(
-    id: json['id'] as String,
-    title: json['name'] as String? ?? '',
-    educator: json['educator_name'] as String? ?? '',
-    subject: json['subject'] as String? ?? '',
-    thumbnailUrl: json['thumbnail_url'] as String? ?? '',
-    rating: _toDouble(json['rating']),
-    price: _toDouble(json['price']),
-    description: json['description'] as String?,
-    level: json['level'] as String?,
-    badge: json['badge'] as String?,
-    totalEnrolled: json['total_enrolled'] as int?,
-    totalLessons: json['total_lessons'] as int?,
-    durationHours: json['duration_hours'] as int?,
-    whatYoullLearn: (json['what_youll_learn'] as List<dynamic>?)
-            ?.map((s) => s.toString())
-            .toList() ??
-        const [],
-    requirements: (json['requirements'] as List<dynamic>?)
-            ?.map((s) => s.toString())
-            .toList() ??
-        const [],
-  );
+  bool get hasDiscount => mrp > 0 && salePrice < mrp;
 
-  static double _toDouble(dynamic value) {
-    if (value == null) return 0;
-    if (value is double) return value;
-    if (value is int) return value.toDouble();
-    if (value is num) return value.toDouble();
-    return double.tryParse(value.toString()) ?? 0;
+  factory Course.fromJson(Map<String, dynamic> j) => Course(
+        id: j['id'] as String,
+        name: j['name'] as String? ?? '',
+        internalName: j['internal_name'] as String?,
+        description: j['description'] as String?,
+        thumbnailUrl: j['thumbnail_url'] as String?,
+        target: j['target'] as String? ?? 'JEE',
+        courseClass: j['class'] as String? ?? '11',
+        language: j['language'] as String? ?? 'Hindi',
+        mrp: _toDouble(j['mrp']),
+        salePrice: _toDouble(j['sale_price']),
+        discountPercent: _toDouble(j['discount_percent']),
+        showPriceWithGst: j['show_price_with_gst'] as bool? ?? false,
+        isCourseFree: j['is_course_free'] as bool? ?? false,
+        maxUsageDays: _toInt(j['max_usage_days']),
+        courseEndDate: j['course_end_date'] != null
+            ? DateTime.tryParse(j['course_end_date'] as String)
+            : null,
+        priority: _toInt(j['priority']) ?? 0,
+        badge: j['badge'] as String?,
+        isActive: j['is_active'] as bool? ?? true,
+        assignedTeacherId: j['assigned_teacher_id'] as String?,
+        whatYoullLearn: _toStringList(j['what_youll_learn']),
+        requirements: _toStringList(j['requirements']),
+        teacherName: j['teacher_name'] as String?,
+      );
+
+  static double _toDouble(dynamic v) {
+    if (v == null) return 0;
+    if (v is num) return v.toDouble();
+    return double.tryParse(v.toString()) ?? 0;
   }
 
+  static int? _toInt(dynamic v) {
+    if (v == null) return null;
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return int.tryParse(v.toString());
+  }
+
+  static List<String> _toStringList(dynamic v) =>
+      (v as List<dynamic>?)?.map((e) => e.toString()).toList() ?? const [];
+
   @override
-  List<Object?> get props => [id, title, educator, subject, thumbnailUrl, rating, price];
+  List<Object?> get props => [id, name, target, courseClass, salePrice];
 }

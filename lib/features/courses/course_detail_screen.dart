@@ -13,6 +13,7 @@ import '../enrollments/data/enrollments_providers.dart';
 import '../tests/data/tests_providers.dart';
 import '../../core/services/supabase_service.dart';
 import '../../core/services/razorpay_service.dart';
+import '../../core/error/app_exception.dart';
 
 // ─────────────────────────────────────────────
 // 💡 Move DS to lib/core/theme/design_system.dart
@@ -122,13 +123,12 @@ class _CourseDetailBodyState extends ConsumerState<_CourseDetailBody>
         .watch(courseEnrolledCountProvider(widget.courseId))
         .valueOrNull;
 
-    final lessonCount =
-        lessonsAsync.valueOrNull?.length ?? course.totalLessons ?? 0;
+    final lessonCount = lessonsAsync.valueOrNull?.length ?? 0;
     final pdfCount = pdfsAsync.valueOrNull?.length ?? 0;
     final reviewCount = reviewsAsync.valueOrNull?.length ?? 0;
     final avgRating =
         reviewsAsync.valueOrNull == null || reviewsAsync.valueOrNull!.isEmpty
-        ? course.rating
+        ? 0.0
         : reviewsAsync.valueOrNull!.fold<double>(0, (s, r) => s + r.rating) /
               reviewsAsync.valueOrNull!.length;
 
@@ -202,7 +202,7 @@ class _CourseHeader extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final subjectBadge =
-        '${course.subject.toUpperCase()} · ${(course.level ?? 'JEE').toUpperCase()}';
+        '${course.target.toUpperCase()} · CLASS ${course.courseClass.toUpperCase()}';
 
     return SliverToBoxAdapter(
       child: Column(
@@ -214,9 +214,9 @@ class _CourseHeader extends ConsumerWidget {
               // Thumbnail
               AspectRatio(
                 aspectRatio: 16 / 9,
-                child: course.thumbnailUrl.isNotEmpty
+                child: (course.thumbnailUrl ?? '').isNotEmpty
                     ? CachedNetworkImage(
-                        imageUrl: course.thumbnailUrl,
+                        imageUrl: course.thumbnailUrl!,
                         fit: BoxFit.cover,
                         placeholder: (_, __) =>
                             Container(color: DS.primaryLight),
@@ -305,13 +305,13 @@ class _CourseHeader extends ConsumerWidget {
                     vertical: DS.s6,
                   ),
                   decoration: BoxDecoration(
-                    color: course.isFree ? DS.success : DS.primary,
+                    color: course.isCourseFree ? DS.success : DS.primary,
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
-                    course.isFree
+                    course.isCourseFree
                         ? '🎓 FREE'
-                        : '₹${course.price.toStringAsFixed(0)}',
+                        : '₹${course.displayPrice.toStringAsFixed(0)}',
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 12,
@@ -354,7 +354,7 @@ class _CourseHeader extends ConsumerWidget {
 
                 // Title
                 Text(
-                  course.title,
+                  course.name,
                   style: const TextStyle(
                     color: DS.textPrimary,
                     fontSize: 22,
@@ -437,8 +437,8 @@ class _CourseHeader extends ConsumerWidget {
                       ),
                       child: Center(
                         child: Text(
-                          course.educator.isNotEmpty
-                              ? course.educator[0].toUpperCase()
+                          (course.teacherName?.isNotEmpty == true)
+                              ? course.teacherName![0].toUpperCase()
                               : 'T',
                           style: const TextStyle(
                             color: Colors.white,
@@ -457,7 +457,7 @@ class _CourseHeader extends ConsumerWidget {
                       ),
                     ),
                     Text(
-                      course.educator,
+                      course.teacherName ?? 'Instructor',
                       style: const TextStyle(
                         color: DS.primary,
                         fontWeight: FontWeight.w700,
@@ -465,7 +465,7 @@ class _CourseHeader extends ConsumerWidget {
                       ),
                     ),
                     Text(
-                      ' · ${course.subject} Dept.',
+                      ' · ${course.target} Dept.',
                       style: const TextStyle(
                         color: DS.textSecondary,
                         fontSize: 12,
@@ -504,8 +504,8 @@ class _CourseHeader extends ConsumerWidget {
                 ),
                 _VDivider(),
                 _StatBox(
-                  value: '${course.totalLessons ?? '—'}',
-                  label: 'Tests',
+                  value: course.target,
+                  label: 'Target',
                   icon: Icons.assignment_outlined,
                   color: DS.primary,
                 ),
@@ -518,8 +518,8 @@ class _CourseHeader extends ConsumerWidget {
                 ),
                 _VDivider(),
                 _StatBox(
-                  value: '${course.durationHours ?? 0}h',
-                  label: 'Duration',
+                  value: 'Cl. ${course.courseClass}',
+                  label: 'Class',
                   icon: Icons.schedule_rounded,
                   color: DS.success,
                 ),
@@ -2089,15 +2089,15 @@ class _TimeTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final items = [
       _TimeItem(
-        Icons.schedule_rounded,
-        'Total Duration',
-        '${course.durationHours ?? 0} hours',
+        Icons.school_rounded,
+        'Target',
+        course.target,
         DS.primary,
       ),
       _TimeItem(
-        Icons.play_circle_outline_rounded,
-        'Total Lectures',
-        '${course.totalLessons ?? 0} lessons',
+        Icons.class_rounded,
+        'Class',
+        'Class ${course.courseClass}',
         DS.indigo,
       ),
       _TimeItem(
@@ -2244,8 +2244,8 @@ class _EnrollBarState extends ConsumerState<_EnrollBar> {
       ref.invalidate(enrollmentsProvider);
       if (mounted) _showSuccessSheet();
     } catch (e) {
-      if (mounted)
-        _showSnack('Enrollment failed. Contact support.', error: true);
+      final msg = e is AppException ? e.userMessage : e.toString();
+      if (mounted) _showSnack('Enrollment failed: $msg', error: true);
     } finally {
       if (mounted) setState(() => _processing = false);
     }
@@ -2275,15 +2275,15 @@ class _EnrollBarState extends ConsumerState<_EnrollBar> {
 
   void _startPayment() {
     final user = SupabaseService.client.auth.currentUser;
-    if (widget.course.isFree) {
+    if (widget.course.isCourseFree) {
       // Free course — enroll directly without payment
       _onPaymentSuccess(PaymentSuccessResponse(null, null, null, null));
       return;
     }
     _rzp.openCheckout(
-      amountInRupees: widget.course.price,
+      amountInRupees: widget.course.salePrice,
       courseId: widget.courseId,
-      courseName: widget.course.title,
+      courseName: widget.course.name,
       userEmail: user?.email,
       userName: user?.userMetadata?['full_name'] as String?,
       userPhone: user?.phone,
@@ -2328,7 +2328,7 @@ class _EnrollBarState extends ConsumerState<_EnrollBar> {
             ),
             const SizedBox(height: DS.s8),
             Text(
-              'You are now enrolled in ${widget.course.title}.',
+              'You are now enrolled in ${widget.course.name}.',
               textAlign: TextAlign.center,
               style: const TextStyle(
                 color: DS.textSecondary,
@@ -2352,7 +2352,7 @@ class _EnrollBarState extends ConsumerState<_EnrollBar> {
                 child: ElevatedButton.icon(
                   onPressed: () {
                     Navigator.pop(context);
-                    context.push('/course-player/${widget.courseId}');
+                    context.push('/my-courses/${widget.courseId}');
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.transparent,
@@ -2421,7 +2421,7 @@ class _EnrollBarState extends ConsumerState<_EnrollBar> {
                 ),
                 child: ElevatedButton.icon(
                   onPressed: () =>
-                      context.push('/course-player/${widget.courseId}'),
+                      context.push('/my-courses/${widget.courseId}'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.transparent,
                     shadowColor: Colors.transparent,
@@ -2446,9 +2446,9 @@ class _EnrollBarState extends ConsumerState<_EnrollBar> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      widget.course.isFree
+                      widget.course.isCourseFree
                           ? 'Free'
-                          : '₹${widget.course.price.toStringAsFixed(0)}',
+                          : '₹${widget.course.displayPrice.toStringAsFixed(0)}',
                       style: const TextStyle(
                         color: DS.textPrimary,
                         fontSize: 24,
@@ -2503,14 +2503,14 @@ class _EnrollBarState extends ConsumerState<_EnrollBar> {
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
                                   Icon(
-                                    widget.course.isFree
+                                    widget.course.isCourseFree
                                         ? Icons.school_rounded
                                         : Icons.payment_rounded,
                                     size: 20,
                                   ),
                                   const SizedBox(width: DS.s8),
                                   Text(
-                                    widget.course.isFree
+                                    widget.course.isCourseFree
                                         ? 'Enroll Free'
                                         : 'Pay & Enroll',
                                     style: const TextStyle(
