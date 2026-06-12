@@ -130,102 +130,153 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
 
   // ── Normal portrait layout ────────────────────────────────────────────────
   Widget _buildNormal() {
-    return Column(
-      children: [
-        // Manual AppBar (avoids Scaffold AppBar overlapping player)
-        Container(
-          color: Colors.black,
-          padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
-          child: Row(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isLandscape = constraints.maxWidth > constraints.maxHeight;
+        if (isLandscape) {
+          // In landscape without fullscreen: player fills width, no info panel
+          return Stack(
             children: [
-              IconButton(
-                icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
-                onPressed: () => Navigator.of(context).pop(),
-              ),
-              Expanded(
-                child: Text(
-                  widget.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
+              Positioned.fill(
+                child: YoutubePlayer(
+                  controller: _controller,
+                  showVideoProgressIndicator: true,
+                  progressIndicatorColor: const Color(0xFFF97315),
+                  progressColors: const ProgressBarColors(
+                    playedColor: Color(0xFFF97315),
+                    handleColor: Color(0xFFF97315),
+                    bufferedColor: Color(0xFFFFD5B0),
+                    backgroundColor: Colors.black26,
                   ),
+                  topActions: const [SizedBox.shrink()],
+                  bottomActions: [
+                    const CurrentPosition(),
+                    const ProgressBar(isExpanded: true),
+                    const RemainingDuration(),
+                    IconButton(
+                      icon: const Icon(Icons.fullscreen_rounded,
+                          color: Colors.white, size: 24),
+                      onPressed: _enterFullScreen,
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(width: 8),
+              Positioned(
+                top: MediaQuery.of(context).padding.top + 4,
+                left: 4,
+                child: IconButton(
+                  icon: const Icon(Icons.arrow_back_rounded,
+                      color: Colors.white, size: 22),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ),
             ],
-          ),
-        ),
-        // Player in portrait — 16:9 ratio
-        YoutubePlayer(
-          controller: _controller,
-          showVideoProgressIndicator: true,
-          progressIndicatorColor: const Color(0xFFF97315),
-          progressColors: const ProgressBarColors(
-            playedColor: Color(0xFFF97315),
-            handleColor: Color(0xFFF97315),
-            bufferedColor: Color(0xFFFFD5B0),
-            backgroundColor: Colors.black26,
-          ),
-          topActions: const [SizedBox.shrink()],
-          bottomActions: [
-            const CurrentPosition(),
-            const ProgressBar(isExpanded: true),
-            const RemainingDuration(),
-            // Custom fullscreen button
-            IconButton(
-              icon: const Icon(Icons.fullscreen_rounded,
-                  color: Colors.white, size: 24),
-              onPressed: _enterFullScreen,
-            ),
-          ],
-        ),
-        // Info panel below player
-        Expanded(
-          child: Container(
-            width: double.infinity,
-            color: const Color(0xFF0F172A),
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.title,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    height: 1.4,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                const Divider(color: Color(0xFF1E293B)),
-                const SizedBox(height: 12),
-                GestureDetector(
-                  onTap: _enterFullScreen,
-                  child: const Row(
-                    children: [
-                      Icon(Icons.fullscreen_rounded,
-                          color: Color(0xFFF97315), size: 18),
-                      SizedBox(width: 8),
-                      Text(
-                        'Tap to watch in fullscreen',
-                        style: TextStyle(
-                          color: Color(0xFFF97315),
-                          fontSize: 13,
+          );
+        }
+
+        // Portrait layout
+        return Column(
+          children: [
+            // AppBar row
+            SafeArea(
+              bottom: false,
+              child: Container(
+                color: Colors.black,
+                child: Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.arrow_back_rounded,
+                          color: Colors.white),
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
+                    Expanded(
+                      child: Text(
+                        widget.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
                           fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                ),
+              ),
+            ),
+            // Player
+            YoutubePlayer(
+              controller: _controller,
+              showVideoProgressIndicator: true,
+              progressIndicatorColor: const Color(0xFFF97315),
+              progressColors: const ProgressBarColors(
+                playedColor: Color(0xFFF97315),
+                handleColor: Color(0xFFF97315),
+                bufferedColor: Color(0xFFFFD5B0),
+                backgroundColor: Colors.black26,
+              ),
+              topActions: const [SizedBox.shrink()],
+              bottomActions: [
+                const CurrentPosition(),
+                const ProgressBar(isExpanded: true),
+                const RemainingDuration(),
+                IconButton(
+                  icon: const Icon(Icons.fullscreen_rounded,
+                      color: Colors.white, size: 24),
+                  onPressed: _enterFullScreen,
+                ),
+              ],
+            ),
+            // Info panel
+            Expanded(
+              child: SingleChildScrollView(
+                child: Container(
+                  width: double.infinity,
+                  color: const Color(0xFF0F172A),
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.title,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          height: 1.4,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      const Divider(color: Color(0xFF1E293B)),
+                      const SizedBox(height: 12),
+                      GestureDetector(
+                        onTap: _enterFullScreen,
+                        child: const Row(
+                          children: [
+                            Icon(Icons.fullscreen_rounded,
+                                color: Color(0xFFF97315), size: 18),
+                            SizedBox(width: 8),
+                            Text(
+                              'Tap to watch in fullscreen',
+                              style: TextStyle(
+                                color: Color(0xFFF97315),
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
                   ),
                 ),
-              ],
+              ),
             ),
-          ),
-        ),
-      ],
+          ],
+        );
+      },
     );
   }
 }

@@ -144,7 +144,7 @@ class StudentDashboardScreen extends ConsumerWidget {
                     _ContinueCard(
                       enrollment: last,
                       onResume: () =>
-                          context.push('/course-player/${last.courseId}'),
+                          context.push('/my-courses/${last.courseId}'),
                     ),
                     const SizedBox(height: DS.s24),
                   ],
@@ -226,7 +226,7 @@ class StudentDashboardScreen extends ConsumerWidget {
                       enrollment: enr[i],
                       index: i,
                       onTap: () =>
-                          context.push('/course-player/${enr[i].courseId}'),
+                          context.push('/my-courses/${enr[i].courseId}'),
                     ),
                   );
                 },
@@ -985,9 +985,7 @@ class _ContinueCard extends StatelessWidget {
                       ),
                       const SizedBox(height: DS.s6),
                       Text(
-                        enrollment.lastLessonTitle ??
-                            enrollment.courseTitle ??
-                            'Course',
+                        enrollment.courseTitle ?? 'Course',
                         style: const TextStyle(
                           color: DS.textPrimary,
                           fontSize: 14.5,

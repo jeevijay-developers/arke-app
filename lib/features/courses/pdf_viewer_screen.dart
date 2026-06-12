@@ -3,8 +3,8 @@ import 'package:flutter_pdfview/flutter_pdfview.dart';
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../../core/error/app_exception.dart';
 import '../../core/theme/colors.dart';
+import '../../core/services/s3_http_client.dart';
 
 class PdfViewerScreen extends StatefulWidget {
   final String title;
@@ -31,9 +31,23 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     _prepare();
   }
 
-  Future<String> _getSignedUrl() async {
-    final url = widget.fileUrl;
-    // Extract path from full Supabase storage URL
+  /// Returns a directly-downloadable URL for the PDF.
+  /// - S3 / external https URLs: use as-is.
+  /// - Supabase storage paths: generate a signed URL.
+  /// Resolves the raw fileUrl to a directly downloadable URL.
+  /// - S3 (megas4.com) URLs  → presigned GET via edge function
+  /// - Supabase storage URLs → Supabase signed URL
+  /// - Relative paths        → Supabase signed URL
+  /// - Other http URLs       → used as-is
+  Future<String> _resolveUrl() async {
+    final url = widget.fileUrl.trim();
+
+    // Private S3 bucket — needs a presigned GET URL
+    if (isS3Url(url)) {
+      return getS3SignedUrl(url);
+    }
+
+    // Supabase storage URL — create a signed URL
     const bucket = 'course-resources';
     final markers = [
       '/storage/v1/object/public/$bucket/',
@@ -42,42 +56,48 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     for (final m in markers) {
       final idx = url.indexOf(m);
       if (idx != -1) {
-        final path = Uri.decodeComponent(url.substring(idx + m.length).split('?').first);
-        try {
-          return await Supabase.instance.client.storage
-              .from(bucket)
-              .createSignedUrl(path, 3600);
-        } catch (_) {}
-      }
-    }
-    // If relative path or already signed
-    if (!url.startsWith('http')) {
-      try {
+        final path = Uri.decodeComponent(
+            url.substring(idx + m.length).split('?').first);
         return await Supabase.instance.client.storage
             .from(bucket)
-            .createSignedUrl(url, 3600);
-      } catch (_) {}
+            .createSignedUrl(path, 3600);
+      }
     }
+
+    // Relative storage path
+    if (!url.startsWith('http')) {
+      return await Supabase.instance.client.storage
+          .from(bucket)
+          .createSignedUrl(url, 3600);
+    }
+
+    // Any other http URL — use directly
     return url;
   }
 
   Future<void> _prepare() async {
     setState(() { _loading = true; _error = null; });
     try {
-      final signedUrl = await _getSignedUrl();
-      _resolvedUrl = signedUrl;
+      final resolvedUrl = await _resolveUrl();
+      _resolvedUrl = resolvedUrl;
 
-      // Download to temp dir so flutter_pdfview can render from file path
       final dir = await getTemporaryDirectory();
       final safeName = widget.title.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
       final filePath = '${dir.path}/$safeName.pdf';
 
-      await Dio().download(signedUrl, filePath,
-        options: Options(responseType: ResponseType.bytes));
+      // Use S3-aware Dio that bypasses the self-signed cert on megas4.com
+      await buildS3Dio().download(
+        resolvedUrl,
+        filePath,
+        options: Options(
+          responseType: ResponseType.bytes,
+          headers: {'Accept': 'application/pdf,*/*'},
+        ),
+      );
 
       if (mounted) setState(() { _localPath = filePath; _loading = false; });
     } catch (e) {
-      if (mounted) setState(() { _error = AppException.from(e).userMessage; _loading = false; });
+      if (mounted) setState(() { _error = e.toString(); _loading = false; });
     }
   }
 
@@ -88,7 +108,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       final dir = await getExternalStorageDirectory() ?? await getTemporaryDirectory();
       final safeName = widget.title.replaceAll(RegExp(r'[^a-zA-Z0-9 ]'), '');
       final filePath = '${dir.path}/$safeName.pdf';
-      await Dio().download(_resolvedUrl!, filePath,
+      await buildS3Dio().download(_resolvedUrl!, filePath,
         options: Options(responseType: ResponseType.bytes));
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -196,7 +216,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                     if (mounted) setState(() => _currentPage = page ?? 0);
                   },
                   onError: (e) {
-                    if (mounted) setState(() => _error = AppException.from(e).userMessage);
+                    if (mounted) setState(() => _error = e.toString());
                   },
                 ),
     );

@@ -12,7 +12,6 @@ import '../../features/auth/signup_screen.dart';
 import '../../features/auth/widgets/student_gate.dart';
 import '../../features/courses/course_detail_screen.dart';
 import '../../features/courses/course_home_screen.dart';
-import '../../features/courses/course_player_screen.dart';
 import '../../features/courses/courses_list_screen.dart';
 import '../../features/courses/folder_view_screen.dart';
 import '../../features/courses/lecture_player_screen.dart';
@@ -38,6 +37,9 @@ import '../../features/profile/privacy_policy_screen.dart';
 import '../../features/profile/terms_of_service_screen.dart';
 import '../../features/profile/coming_soon_screen.dart';
 import '../../features/mentor_chat/mentor_chat_screen.dart';
+import '../../features/auth/phone_otp_screen.dart';
+import '../../features/auth/profile_setup_screen.dart';
+import '../../features/onboarding/onboarding_screen.dart';
 import '../../features/splash/splash_screen.dart';
 import '../../features/tests/test_engine_screen.dart';
 import '../../features/tests/test_result_screen.dart';
@@ -66,13 +68,36 @@ final routerProvider = Provider<GoRouter>((ref) {
       final signedIn = auth.isSignedIn || ref.read(authStateProvider);
       final atAuth = loc == '/login' || loc == '/signup' || loc == '/verify-otp';
       final atPasswordReset = loc == '/forgot' || loc == '/forgot-otp' || loc == '/reset-password';
+      if (loc == '/onboarding') return null;
+      // If profile-setup flag is set, signed-in user goes to /profile-setup
+      // regardless of current location (including /phone-otp).
+      final needsSetup = ref.read(needsProfileSetupProvider);
+      debugPrint('[Router] loc=$loc signedIn=$signedIn needsSetup=$needsSetup');
+      if (signedIn && needsSetup && loc != '/profile-setup') return '/profile-setup';
+      if (loc == '/profile-setup') return null;
+      // Only block /phone-otp redirect when NOT needing setup (unauthenticated state)
+      if (loc == '/phone-otp') return null;
       if (!signedIn && !atAuth && !atPasswordReset) return '/login';
-      if (signedIn && atAuth) return '/home';
+      if (signedIn && atAuth) return '/courses';
       return null;
     },
     routes: [
       GoRoute(path: '/splash', builder: (_, __) => const SplashScreen()),
+      GoRoute(path: '/onboarding', builder: (_, __) => const OnboardingScreen()),
       GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
+      GoRoute(
+        path: '/phone-otp',
+        parentNavigatorKey: _rootKey,
+        builder: (ctx, s) => PhoneOtpScreen(
+          phone: s.uri.queryParameters['phone'] ?? '',
+          isRegistered: s.uri.queryParameters['registered'] == '1',
+        ),
+      ),
+      GoRoute(
+        path: '/profile-setup',
+        parentNavigatorKey: _rootKey,
+        builder: (ctx, s) => const ProfileSetupScreen(),
+      ),
       GoRoute(path: '/signup', builder: (_, __) => const SignupScreen()),
       GoRoute(
         path: '/forgot',
@@ -157,14 +182,7 @@ final routerProvider = Provider<GoRouter>((ref) {
           subFolderName: s.extra as String? ?? 'Sub-folder',
         ),
       ),
-      GoRoute(
-        path: '/course-player/:id',
-        parentNavigatorKey: _rootKey,
-        builder: (_, s) => CoursePlayerScreen(
-          courseId: s.pathParameters['id']!,
-          initialLessonId: s.uri.queryParameters['lessonId'],
-        ),
-      ),
+
       GoRoute(
         path: '/lecture/:id',
         parentNavigatorKey: _rootKey,

@@ -1,147 +1,356 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/providers.dart';
-import '../../core/theme/colors.dart';
-import '../../core/widgets/primary_button.dart';
 
+// ── Slide data ─────────────────────────────────────────────────────────────
+class _Slide {
+  final String image;
+  final String examLabel;
+  final Color examColor;
+  final String headline;
+  final String description;
+  final String tagline;
+  final Color accentColor;
+  final Color bgColor;
+
+  const _Slide({
+    required this.image,
+    required this.examLabel,
+    required this.examColor,
+    required this.headline,
+    required this.description,
+    required this.tagline,
+    required this.accentColor,
+    required this.bgColor,
+  });
+}
+
+const _kSlides = [
+  _Slide(
+    image: 'assets/images/jee.png',
+    examLabel: 'JEE',
+    examColor: Color(0xFFF97315),
+    headline: 'Crack the Exam.\nBuild the Future.',
+    description: 'Top-notch preparation for JEE\nMain & Advanced.',
+    tagline: 'Your dream rank is a step away!',
+    accentColor: Color(0xFFF97315),
+    bgColor: Color(0xFFFFF7F0),
+  ),
+  _Slide(
+    image: 'assets/images/neet.jpeg',
+    examLabel: 'NEET',
+    examColor: Color(0xFF16A34A),
+    headline: 'Dream. Prepare.\nBecome a Healer.',
+    description: 'Comprehensive NEET preparation\nfor your medical career.',
+    tagline: 'Every step today, heals tomorrow.',
+    accentColor: Color(0xFF16A34A),
+    bgColor: Color(0xFFF0FDF4),
+  ),
+  _Slide(
+    image: 'assets/images/boards.png',
+    examLabel: 'BOARD',
+    examColor: Color(0xFF2563EB),
+    headline: 'Strong Concepts.\nBright Results.',
+    description: 'Excel in your board exams with\nconcept clarity and practice.',
+    tagline: 'Strong basics. Endless possibilities.',
+    accentColor: Color(0xFF2563EB),
+    bgColor: Color(0xFFEFF6FF),
+  ),
+  _Slide(
+    image: 'assets/images/foundation.png',
+    examLabel: 'FOUNDATION',
+    examColor: Color(0xFFF97315),
+    headline: 'Strong Foundation.\nLimitless Future.',
+    description: 'Build a strong base for JEE, NEET\nand beyond.',
+    tagline: 'A strong start builds a strong future.',
+    accentColor: Color(0xFFF97315),
+    bgColor: Color(0xFFFFF7F0),
+  ),
+];
+
+// ── Screen ─────────────────────────────────────────────────────────────────
 class OnboardingScreen extends ConsumerStatefulWidget {
   const OnboardingScreen({super.key});
+
   @override
   ConsumerState<OnboardingScreen> createState() => _OnboardingScreenState();
 }
 
 class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
-  final _controller = PageController();
+  final _pageCtrl = PageController();
   int _page = 0;
-  String _region = 'IN';
-  String _goal = 'JEE';
 
-  final _slides = const [
-    (Icons.auto_stories_rounded, 'Live classes, anytime', 'Join interactive live lectures from India\'s top educators.'),
-    (Icons.quiz_rounded, 'Test yourself', 'Immersive mock tests with instant analysis.'),
-    (Icons.trending_up_rounded, 'Track your progress', 'Streaks, leaderboards, and AI doubt solving.'),
-  ];
+  @override
+  void dispose() {
+    _pageCtrl.dispose();
+    super.dispose();
+  }
 
   Future<void> _finish() async {
-    final prefs = ref.read(prefsProvider);
-    await prefs.setOnboardingDone(true);
-    await prefs.setRegion(_region);
-    await prefs.setGoal(_goal);
-    ref.read(regionProvider.notifier).set(_region);
-    if (!mounted) return;
-    context.go('/login');
+    await ref.read(prefsProvider).setOnboardingDone(true);
+    if (mounted) context.go('/login');
+  }
+
+  void _next() {
+    // Use controller's actual page to avoid stale _page state during animation
+    final currentPage = (_pageCtrl.hasClients ? _pageCtrl.page?.round() : null) ?? _page;
+    if (currentPage < _kSlides.length - 1) {
+      _pageCtrl.nextPage(
+        duration: const Duration(milliseconds: 380),
+        curve: Curves.easeInOutCubic,
+      );
+    } else {
+      _finish();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
-        child: Column(
+    final slide = _kSlides[_page];
+    final bottomPad = MediaQuery.of(context).padding.bottom;
+    final topPad = MediaQuery.of(context).padding.top;
+
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.dark,
+        systemNavigationBarColor: Colors.white,
+        systemNavigationBarIconBrightness: Brightness.dark,
+      ),
+      child: Scaffold(
+        backgroundColor: Colors.white,
+        body: Column(
           children: [
-            Expanded(
-              child: PageView.builder(
-                controller: _controller,
-                onPageChanged: (i) => setState(() => _page = i),
-                itemCount: _slides.length,
-                itemBuilder: (_, i) {
-                  final s = _slides[i];
-                  return Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Container(
-                          width: 140, height: 140,
-                          decoration: BoxDecoration(color: AppColors.primaryLight, borderRadius: BorderRadius.circular(32)),
-                          child: Icon(s.$1, size: 72, color: AppColors.primary),
-                        ),
-                        const SizedBox(height: 32),
-                        Text(s.$2, style: Theme.of(context).textTheme.headlineMedium, textAlign: TextAlign.center),
-                        const SizedBox(height: 12),
-                        Text(s.$3, style: Theme.of(context).textTheme.bodyLarge, textAlign: TextAlign.center),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: List.generate(_slides.length, (i) {
-                final active = i == _page;
-                return AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  margin: const EdgeInsets.symmetric(horizontal: 4),
-                  width: active ? 20 : 8, height: 8,
-                  decoration: BoxDecoration(
-                    color: active ? AppColors.primary : AppColors.border,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                );
-              }),
-            ),
-            const SizedBox(height: 24),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
+            // ── Top section: exam label + headline + description ───────────
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 350),
+              color: slide.bgColor,
+              padding: EdgeInsets.fromLTRB(24, topPad + 16, 24, 0),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Text('Region', style: Theme.of(context).textTheme.titleMedium),
-                  const SizedBox(height: 8),
-                  Row(children: [
-                    _pill('🇮🇳 India', 'IN'),
-                    const SizedBox(width: 8),
-                    _pill('🇦🇪 Dubai', 'AE'),
-                  ]),
+                  // Skip button row
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      if (_page < _kSlides.length - 1)
+                        GestureDetector(
+                          onTap: _finish,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(20),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.06),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: const Text(
+                              'Skip',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF64748B),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // Exam label — fixed height so all slides stay consistent
+                  SizedBox(
+                    height: 44,
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 300),
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          slide.examLabel,
+                          key: ValueKey(slide.examLabel),
+                          style: TextStyle(
+                            fontSize: 36,
+                            fontWeight: FontWeight.w900,
+                            color: slide.examColor,
+                            letterSpacing: 1.5,
+                            height: 1.0,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 10),
+
+                  // Headline
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 300),
+                    child: Text(
+                      slide.headline,
+                      key: ValueKey(slide.headline),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF111827),
+                        height: 1.3,
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 10),
+
+                  // Description
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 300),
+                    child: Text(
+                      slide.description,
+                      key: ValueKey(slide.description),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 13.5,
+                        color: Color(0xFF6B7280),
+                        height: 1.55,
+                      ),
+                    ),
+                  ),
+
                   const SizedBox(height: 16),
-                  Text('Your goal', style: Theme.of(context).textTheme.titleMedium),
-                  const SizedBox(height: 8),
-                  Wrap(spacing: 8, runSpacing: 8, children: [
-                    for (final g in ['JEE', 'NEET', 'Boards', 'JEE+NEET']) _goalChip(g),
-                  ]),
                 ],
               ),
             ),
-            const SizedBox(height: 24),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: PrimaryButton(label: 'Continue', onPressed: _finish),
+
+            // ── Image carousel ─────────────────────────────────────────────
+            Expanded(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 350),
+                color: slide.bgColor,
+                child: PageView.builder(
+                  controller: _pageCtrl,
+                  onPageChanged: (i) => setState(() => _page = i),
+                  itemCount: _kSlides.length,
+                  itemBuilder: (_, i) => _SlidePage(slide: _kSlides[i]),
+                ),
+              ),
             ),
-            const SizedBox(height: 16),
+
+            // ── Bottom controls ────────────────────────────────────────────
+            Container(
+              color: Colors.white,
+              padding: EdgeInsets.fromLTRB(24, 20, 24, bottomPad + 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Dot indicators
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: List.generate(
+                      _kSlides.length,
+                      (i) => AnimatedContainer(
+                        duration: const Duration(milliseconds: 280),
+                        curve: Curves.easeOut,
+                        margin: const EdgeInsets.symmetric(horizontal: 4),
+                        width: i == _page ? 28 : 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: i == _page
+                              ? slide.accentColor
+                              : const Color(0xFFE2E8F0),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Button
+                  SizedBox(
+                    width: double.infinity,
+                    height: 54,
+                    child: ElevatedButton(
+                      onPressed: _next,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: slide.accentColor,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            ((_pageCtrl.hasClients ? _pageCtrl.page?.round() : null) ?? _page) == _kSlides.length - 1
+                                ? 'Get Started'
+                                : 'Start Learning',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.2,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Icon(Icons.arrow_forward_rounded, size: 20),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // Tagline
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 300),
+                    child: Text(
+                      slide.tagline,
+                      key: ValueKey(slide.tagline),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        color: Color(0xFF9CA3AF),
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
     );
   }
+}
 
-  Widget _pill(String label, String value) {
-    final sel = _region == value;
-    return GestureDetector(
-      onTap: () => setState(() => _region = value),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        decoration: BoxDecoration(
-          color: sel ? AppColors.primary : Colors.white,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: sel ? AppColors.primary : AppColors.border),
-        ),
-        child: Text(label, style: TextStyle(color: sel ? Colors.white : AppColors.navy, fontWeight: FontWeight.w600)),
-      ),
-    );
-  }
+// ── Single slide image ─────────────────────────────────────────────────────
+class _SlidePage extends StatelessWidget {
+  final _Slide slide;
+  const _SlidePage({required this.slide});
 
-  Widget _goalChip(String g) {
-    final sel = _goal == g;
-    return GestureDetector(
-      onTap: () => setState(() => _goal = g),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: sel ? AppColors.primary : AppColors.primaryLight,
-          borderRadius: BorderRadius.circular(999),
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: Image.asset(
+          slide.image,
+          width: double.infinity,
+          height: double.infinity,
+          fit: BoxFit.cover,
+          alignment: Alignment.topCenter,
         ),
-        child: Text(g, style: TextStyle(color: sel ? Colors.white : AppColors.navy, fontWeight: FontWeight.w600)),
       ),
     );
   }

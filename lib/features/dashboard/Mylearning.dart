@@ -850,27 +850,6 @@ class _EnrollmentCard extends StatelessWidget {
                         ),
 
                         const Spacer(),
-
-                        // Lesson count
-                        if (enrollment.courseTotalLessons != null)
-                          Row(
-                            children: [
-                              const Icon(
-                                Icons.play_circle_outline_rounded,
-                                size: 12,
-                                color: DS.textHint,
-                              ),
-                              const SizedBox(width: DS.s4),
-                              Text(
-                                '${enrollment.completedLessons}/${enrollment.courseTotalLessons} lessons',
-                                style: const TextStyle(
-                                  color: DS.textSecondary,
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ),
                       ],
                     ),
                   ],

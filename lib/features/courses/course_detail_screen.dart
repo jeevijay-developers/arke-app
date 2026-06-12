@@ -3,17 +3,21 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
+import 'youtube_player_screen.dart';
+import 's3_video_player_screen.dart';
 import 'pdf_viewer_screen.dart';
 import 'data/courses_providers.dart';
+import 'data/models/content_item.dart';
 import 'data/favourites_provider.dart';
 import 'data/models/course.dart';
-import 'data/models/lesson.dart';
 import '../enrollments/data/enrollments_providers.dart';
 import '../tests/data/tests_providers.dart';
 import '../../core/services/supabase_service.dart';
 import '../../core/services/razorpay_service.dart';
 import '../../core/error/app_exception.dart';
+import '../../core/providers.dart';
 
 // ─────────────────────────────────────────────
 // 💡 Move DS to lib/core/theme/design_system.dart
@@ -99,7 +103,7 @@ class _CourseDetailBody extends ConsumerStatefulWidget {
 class _CourseDetailBodyState extends ConsumerState<_CourseDetailBody>
     with SingleTickerProviderStateMixin {
   late TabController _tabCtrl;
-  static const _tabs = ['About', 'Lectures', 'Tests', 'PDF Notes', 'Time'];
+  static const _tabs = ['About', 'Lectures', 'PDFs', 'Tests', 'Time'];
 
   @override
   void initState() {
@@ -116,15 +120,11 @@ class _CourseDetailBodyState extends ConsumerState<_CourseDetailBody>
   @override
   Widget build(BuildContext context) {
     final course = widget.course;
-    final lessonsAsync = ref.watch(lessonsProvider(widget.courseId));
     final reviewsAsync = ref.watch(courseReviewsProvider(widget.courseId));
-    final pdfsAsync = ref.watch(coursePdfsProvider(widget.courseId));
     final enrolledCount = ref
         .watch(courseEnrolledCountProvider(widget.courseId))
         .valueOrNull;
 
-    final lessonCount = lessonsAsync.valueOrNull?.length ?? 0;
-    final pdfCount = pdfsAsync.valueOrNull?.length ?? 0;
     final reviewCount = reviewsAsync.valueOrNull?.length ?? 0;
     final avgRating =
         reviewsAsync.valueOrNull == null || reviewsAsync.valueOrNull!.isEmpty
@@ -145,8 +145,6 @@ class _CourseDetailBodyState extends ConsumerState<_CourseDetailBody>
               course: course,
               avgRating: avgRating,
               reviewCount: reviewCount,
-              lessonCount: lessonCount,
-              pdfCount: pdfCount,
               enrolledCount: enrolledCount,
               tabCtrl: _tabCtrl,
               tabs: _tabs,
@@ -156,12 +154,9 @@ class _CourseDetailBodyState extends ConsumerState<_CourseDetailBody>
             controller: _tabCtrl,
             children: [
               _AboutTab(course: course),
-              _LecturesTab(
-                lessonsAsync: lessonsAsync,
-                courseId: widget.courseId,
-              ),
+              _LecturesTab(courseId: widget.courseId),
+              _PdfsTab(courseId: widget.courseId),
               _TestsTab(courseId: widget.courseId),
-              _PdfsTab(pdfsAsync: pdfsAsync, courseId: widget.courseId),
               _TimeTab(course: course),
             ],
           ),
@@ -182,8 +177,6 @@ class _CourseHeader extends ConsumerWidget {
   final Course course;
   final double avgRating;
   final int reviewCount;
-  final int lessonCount;
-  final int pdfCount;
   final int? enrolledCount;
   final TabController tabCtrl;
   final List<String> tabs;
@@ -192,8 +185,6 @@ class _CourseHeader extends ConsumerWidget {
     required this.course,
     required this.avgRating,
     required this.reviewCount,
-    required this.lessonCount,
-    required this.pdfCount,
     required this.enrolledCount,
     required this.tabCtrl,
     required this.tabs,
@@ -330,25 +321,76 @@ class _CourseHeader extends ConsumerWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Subject badge
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: DS.s8,
-                    vertical: DS.s4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: DS.primaryLight,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    subjectBadge,
-                    style: const TextStyle(
-                      color: DS.primary,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.5,
+                // Subject badge + Featured badge
+                Wrap(
+                  spacing: DS.s8,
+                  runSpacing: DS.s4,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: DS.s8,
+                        vertical: DS.s4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: DS.primaryLight,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        subjectBadge,
+                        style: const TextStyle(
+                          color: DS.primary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
                     ),
-                  ),
+                    if (course.isFeatured)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: DS.s8,
+                          vertical: DS.s4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFF7ED),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: DS.warning, width: 1),
+                        ),
+                        child: const Text(
+                          '⭐ FEATURED',
+                          style: TextStyle(
+                            color: DS.warning,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ),
+                    if (course.badge != null && course.badge!.isNotEmpty)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: DS.s8,
+                          vertical: DS.s4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: DS.indigo.withValues(alpha: 0.10),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: DS.indigo.withValues(alpha: 0.35),
+                            width: 1,
+                          ),
+                        ),
+                        child: Text(
+                          course.badge!.toUpperCase(),
+                          style: const TextStyle(
+                            color: DS.indigo,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
                 const SizedBox(height: DS.s10),
 
@@ -497,13 +539,6 @@ class _CourseHeader extends ConsumerWidget {
             child: Row(
               children: [
                 _StatBox(
-                  value: '$lessonCount',
-                  label: 'Lectures',
-                  icon: Icons.play_circle_outline_rounded,
-                  color: DS.indigo,
-                ),
-                _VDivider(),
-                _StatBox(
                   value: course.target,
                   label: 'Target',
                   icon: Icons.assignment_outlined,
@@ -511,16 +546,16 @@ class _CourseHeader extends ConsumerWidget {
                 ),
                 _VDivider(),
                 _StatBox(
-                  value: '$pdfCount',
-                  label: 'PDFs',
-                  icon: Icons.picture_as_pdf_outlined,
-                  color: DS.error,
+                  value: 'Cl. ${course.courseClass}',
+                  label: 'Class',
+                  icon: Icons.school_rounded,
+                  color: DS.indigo,
                 ),
                 _VDivider(),
                 _StatBox(
-                  value: 'Cl. ${course.courseClass}',
-                  label: 'Class',
-                  icon: Icons.schedule_rounded,
+                  value: enrolledCount != null ? _fmtNum(enrolledCount!) : '—',
+                  label: 'Enrolled',
+                  icon: Icons.people_outline_rounded,
                   color: DS.success,
                 ),
                 _VDivider(),
@@ -660,6 +695,42 @@ class _AboutTab extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.all(DS.s16),
       children: [
+        if (course.tags.isNotEmpty) ...[
+          _TabSectionLabel(label: 'Topics Covered'),
+          const SizedBox(height: DS.s10),
+          Wrap(
+            spacing: DS.s8,
+            runSpacing: DS.s8,
+            children: course.tags
+                .map(
+                  (tag) => Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: DS.s10,
+                      vertical: DS.s6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: DS.primaryLight,
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: DS.primary.withValues(alpha: 0.25),
+                        width: 1,
+                      ),
+                    ),
+                    child: Text(
+                      tag,
+                      style: const TextStyle(
+                        color: DS.primary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                )
+                .toList(),
+          ),
+          const SizedBox(height: DS.s20),
+        ],
+
         if (course.description != null) ...[
           _TabSectionLabel(label: 'About This Course'),
           const SizedBox(height: DS.s10),
@@ -1353,199 +1424,68 @@ class _StarRow extends StatelessWidget {
 // LECTURES TAB
 // ─────────────────────────────────────────────
 class _LecturesTab extends ConsumerWidget {
-  final AsyncValue<List<Lesson>> lessonsAsync;
   final String courseId;
-  const _LecturesTab({required this.lessonsAsync, required this.courseId});
+  const _LecturesTab({required this.courseId});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final isEnrolled =
-        ref.watch(isEnrolledProvider(courseId)).valueOrNull ?? false;
-    final enrollmentsAsync = ref.watch(enrollmentsProvider);
-    final enrollmentList = enrollmentsAsync.valueOrNull ?? [];
-    final enrollment =
-        enrollmentList.where((e) => e.courseId == courseId).isNotEmpty
-        ? enrollmentList.firstWhere((e) => e.courseId == courseId)
-        : null;
-    final chaptersAsync = ref.watch(chaptersProvider(courseId));
+    final itemsAsync = ref.watch(freePreviewItemsProvider(courseId));
 
-    return lessonsAsync.when(
+    return itemsAsync.when(
       loading: () => const Center(
         child: CircularProgressIndicator(color: DS.primary, strokeWidth: 2.5),
       ),
-      error: (_, __) => const Center(
-        child: Text(
-          'Failed to load lessons',
-          style: TextStyle(color: DS.textSecondary),
-        ),
+      error: (e, _) => const Center(
+        child: Text('Failed to load lectures',
+            style: TextStyle(color: DS.textSecondary)),
       ),
-      data: (lessons) {
-        if (lessons.isEmpty) {
+      data: (items) {
+        if (items.isEmpty) {
           return _EmptyTabState(
             icon: Icons.play_circle_outline_rounded,
-            message: 'No lessons yet',
+            message: 'No free lectures available yet',
           );
         }
         return ListView(
           padding: const EdgeInsets.all(DS.s16),
           children: [
-            // Progress card
-            if (isEnrolled && enrollment != null) ...[
-              Container(
-                padding: const EdgeInsets.all(DS.s16),
-                decoration: BoxDecoration(
-                  color: DS.surface,
-                  borderRadius: BorderRadius.circular(DS.radiusMd),
-                  border: Border.all(color: DS.border, width: 1.2),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.04),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: DS.s14, vertical: DS.s12),
+              decoration: BoxDecoration(
+                color: DS.successSurface,
+                borderRadius: BorderRadius.circular(DS.radiusMd),
+                border: Border.all(color: DS.success.withValues(alpha: 0.30)),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: DS.success.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(DS.radiusSm),
                     ),
-                  ],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Text(
-                          'Your Progress',
-                          style: TextStyle(
-                            color: DS.textPrimary,
-                            fontSize: 14.5,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const Spacer(),
-                        // Continue button
-                        GestureDetector(
-                          onTap: () => context.push('/course-player/$courseId'),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: DS.s12,
-                              vertical: DS.s6,
-                            ),
-                            decoration: BoxDecoration(
-                              gradient: const LinearGradient(
-                                colors: [Color(0xFFFF8C38), DS.primary],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ),
-                              borderRadius: BorderRadius.circular(999),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: DS.primary.withOpacity(0.28),
-                                  blurRadius: 8,
-                                  offset: const Offset(0, 3),
-                                ),
-                              ],
-                            ),
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.play_arrow_rounded,
-                                  color: Colors.white,
-                                  size: 14,
-                                ),
-                                SizedBox(width: DS.s4),
-                                Text(
-                                  'Continue',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: DS.s8),
-                    Text(
-                      '${enrollment.completedLessons} of ${enrollment.courseTotalLessons ?? lessons.length} lessons completed',
-                      style: const TextStyle(
-                        color: DS.textSecondary,
+                    child: const Icon(Icons.lock_open_rounded,
+                        color: DS.success, size: 17),
+                  ),
+                  const SizedBox(width: DS.s10),
+                  const Expanded(
+                    child: Text(
+                      'Free preview lectures — available to everyone.',
+                      style: TextStyle(
+                        color: DS.success,
                         fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        height: 1.4,
                       ),
                     ),
-                    const SizedBox(height: DS.s10),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(999),
-                      child: LinearProgressIndicator(
-                        value: enrollment.progressFraction,
-                        minHeight: 8,
-                        backgroundColor: DS.border,
-                        color: DS.primary,
-                      ),
-                    ),
-                    const SizedBox(height: DS.s6),
-                    Row(
-                      children: [
-                        Text(
-                          '${enrollment.progressPercent}% complete',
-                          style: const TextStyle(
-                            color: DS.primary,
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        if (enrollment.lastLessonTitle != null) ...[
-                          const Spacer(),
-                          Flexible(
-                            child: Text(
-                              'Last: ${enrollment.lastLessonTitle}',
-                              style: const TextStyle(
-                                color: DS.textSecondary,
-                                fontSize: 11,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-              const SizedBox(height: DS.s16),
-            ],
-
-            // Chapter / lesson list
-            chaptersAsync.when(
-              loading: () => const SizedBox.shrink(),
-              error: (_, __) => _FlatLessonList(
-                lessons: lessons,
-                isEnrolled: isEnrolled,
-                courseId: courseId,
-              ),
-              data: (chapters) {
-                if (chapters.isEmpty) {
-                  return _FlatLessonList(
-                    lessons: lessons,
-                    isEnrolled: isEnrolled,
-                    courseId: courseId,
-                  );
-                }
-                return Column(
-                  children: chapters.map((ch) {
-                    final chLessons =
-                        lessons.where((l) => l.chapterId == ch.id).toList()
-                          ..sort((a, b) => a.position.compareTo(b.position));
-                    return _ChapterBlock(
-                      chapter: ch,
-                      lessons: chLessons,
-                      isEnrolled: isEnrolled,
-                      courseId: courseId,
-                    );
-                  }).toList(),
-                );
-              },
             ),
+            const SizedBox(height: DS.s16),
+            ...items.map((item) => _FreePreviewVideoCard(item: item)),
           ],
         );
       },
@@ -1553,238 +1493,353 @@ class _LecturesTab extends ConsumerWidget {
   }
 }
 
-class _FlatLessonList extends StatelessWidget {
-  final List<Lesson> lessons;
-  final bool isEnrolled;
-  final String courseId;
-  const _FlatLessonList({
-    required this.lessons,
-    required this.isEnrolled,
-    required this.courseId,
-  });
+// ─────────────────────────────────────────────
+// FREE PREVIEW VIDEO CARD
+// ─────────────────────────────────────────────
+class _FreePreviewVideoCard extends StatelessWidget {
+  final ContentItem item;
+  const _FreePreviewVideoCard({required this.item});
 
-  @override
-  Widget build(BuildContext context) => Column(
-    children: lessons
-        .map(
-          (l) =>
-              _LessonRow(lesson: l, isEnrolled: isEnrolled, courseId: courseId),
-        )
-        .toList(),
-  );
-}
-
-class _ChapterBlock extends StatefulWidget {
-  final dynamic chapter;
-  final List<Lesson> lessons;
-  final bool isEnrolled;
-  final String courseId;
-  const _ChapterBlock({
-    required this.chapter,
-    required this.lessons,
-    required this.isEnrolled,
-    required this.courseId,
-  });
-
-  @override
-  State<_ChapterBlock> createState() => _ChapterBlockState();
-}
-
-class _ChapterBlockState extends State<_ChapterBlock> {
-  bool _expanded = true;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        GestureDetector(
-          onTap: () => setState(() => _expanded = !_expanded),
-          child: Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: DS.s14,
-              vertical: DS.s12,
-            ),
-            decoration: BoxDecoration(
-              color: DS.primaryLight,
-              borderRadius: BorderRadius.circular(DS.radiusMd),
-              border: Border.all(color: DS.primary.withOpacity(0.20), width: 1),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 28,
-                  height: 28,
-                  decoration: BoxDecoration(
-                    color: DS.primary.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(DS.radiusSm),
-                  ),
-                  child: const Icon(
-                    Icons.folder_outlined,
-                    color: DS.primary,
-                    size: 16,
-                  ),
-                ),
-                const SizedBox(width: DS.s10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        widget.chapter.title,
-                        style: const TextStyle(
-                          color: DS.textPrimary,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 13.5,
-                        ),
-                      ),
-                      Text(
-                        '${widget.lessons.length} lesson${widget.lessons.length == 1 ? '' : 's'}',
-                        style: const TextStyle(
-                          color: DS.textSecondary,
-                          fontSize: 11.5,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                AnimatedRotation(
-                  turns: _expanded ? 0 : -0.25,
-                  duration: const Duration(milliseconds: 200),
-                  child: const Icon(
-                    Icons.keyboard_arrow_down_rounded,
-                    color: DS.primary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        if (_expanded)
-          Container(
-            margin: const EdgeInsets.only(left: DS.s12),
-            decoration: BoxDecoration(
-              border: Border(
-                left: BorderSide(color: DS.primary.withOpacity(0.20), width: 2),
-              ),
-            ),
-            child: Column(
-              children: widget.lessons
-                  .map(
-                    (l) => _LessonRow(
-                      lesson: l,
-                      isEnrolled: widget.isEnrolled,
-                      courseId: widget.courseId,
-                    ),
-                  )
-                  .toList(),
-            ),
-          ),
-        const SizedBox(height: DS.s10),
-      ],
-    );
+  bool get _isYoutube {
+    final url = item.videoUrl ?? item.fileUrl ?? '';
+    if (url.contains('youtube.com') || url.contains('youtu.be')) return true;
+    if (url.startsWith('http') && !url.contains('youtube')) return false;
+    return item.videoSource == 'youtube';
   }
-}
 
-class _LessonRow extends StatelessWidget {
-  final Lesson lesson;
-  final bool isEnrolled;
-  final String courseId;
-  const _LessonRow({
-    required this.lesson,
-    required this.isEnrolled,
-    required this.courseId,
-  });
+  void _play(BuildContext context) {
+    final url = item.videoUrl ?? item.fileUrl;
+    if (url == null) return;
+    if (_isYoutube) {
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => YoutubePlayerScreen(videoUrl: url, title: item.title),
+      ));
+    } else {
+      Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => S3VideoPlayerScreen(videoUrl: url, title: item.title),
+      ));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final canPlay = isEnrolled || lesson.isFreePreview;
-    final isVideo = lesson.type == 'video';
-
-    return InkWell(
-      onTap: canPlay
-          ? () => context.push('/course-player/$courseId?lessonId=${lesson.id}')
-          : null,
-      borderRadius: BorderRadius.circular(DS.radiusSm),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: DS.s8, horizontal: DS.s8),
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        _play(context);
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: DS.s10),
+        padding: const EdgeInsets.all(DS.s14),
+        decoration: BoxDecoration(
+          color: DS.surface,
+          borderRadius: BorderRadius.circular(DS.radiusMd),
+          border: Border.all(color: DS.border, width: 1.2),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x0A000000),
+              blurRadius: 6,
+              offset: Offset(0, 2),
+            ),
+          ],
+        ),
         child: Row(
           children: [
-            // Icon tile
+            // Video SVG icon tile
             Container(
-              width: 36,
-              height: 36,
+              width: 46,
+              height: 46,
               decoration: BoxDecoration(
-                color: canPlay
-                    ? (isVideo ? DS.primaryLight : DS.indigo.withOpacity(0.10))
-                    : DS.surfaceVariant,
-                borderRadius: BorderRadius.circular(DS.radiusSm),
+                color: DS.primaryLight,
+                borderRadius: BorderRadius.circular(DS.radiusMd),
               ),
-              child: Icon(
-                isVideo ? Icons.play_arrow_rounded : Icons.description_outlined,
-                color: canPlay
-                    ? (isVideo ? DS.primary : DS.indigo)
-                    : DS.textHint,
-                size: 18,
+              padding: const EdgeInsets.all(8),
+              child: SvgPicture.asset(
+                'assets/SVGs/video.svg',
+                fit: BoxFit.contain,
               ),
             ),
             const SizedBox(width: DS.s12),
 
-            // Title + duration
+            // Title + free badge
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    lesson.title,
-                    style: TextStyle(
-                      color: canPlay ? DS.textPrimary : DS.textHint,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13.5,
-                    ),
-                    maxLines: 1,
+                    item.title,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: DS.s2),
-                  Text(
-                    '${lesson.durationMin} min',
                     style: const TextStyle(
-                      color: DS.textSecondary,
-                      fontSize: 11.5,
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w700,
+                      color: DS.textPrimary,
+                      height: 1.35,
+                    ),
+                  ),
+                  const SizedBox(height: DS.s4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: DS.s8, vertical: DS.s2),
+                    decoration: BoxDecoration(
+                      color: DS.success.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: const Text(
+                      'Free',
+                      style: TextStyle(
+                        color: DS.success,
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
 
-            // Badge / lock
-            if (lesson.isFreePreview)
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: DS.s8,
-                  vertical: DS.s4,
-                ),
-                decoration: BoxDecoration(
-                  color: DS.success.withOpacity(0.10),
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: DS.success.withOpacity(0.25)),
-                ),
-                child: const Text(
-                  'Free',
-                  style: TextStyle(
-                    color: DS.success,
-                    fontSize: 10.5,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              )
-            else
-              Icon(
-                isEnrolled
-                    ? Icons.play_circle_outline_rounded
-                    : Icons.lock_outline_rounded,
-                color: isEnrolled ? DS.primary : DS.textHint,
+            const SizedBox(width: DS.s8),
+
+            // Play action button
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: DS.primaryLight,
+                borderRadius: BorderRadius.circular(DS.radiusSm),
+              ),
+              child: const Icon(
+                Icons.play_arrow_rounded,
+                color: DS.primary,
                 size: 18,
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// PDFs TAB
+// ─────────────────────────────────────────────
+class _PdfsTab extends ConsumerWidget {
+  final String courseId;
+  const _PdfsTab({required this.courseId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final pdfsAsync = ref.watch(coursePdfItemsProvider(courseId));
+    final isEnrolled =
+        ref.watch(isEnrolledProvider(courseId)).valueOrNull ?? false;
+
+    return pdfsAsync.when(
+      loading: () => const Center(
+        child: CircularProgressIndicator(color: DS.primary, strokeWidth: 2.5),
+      ),
+      error: (e, _) => const Center(
+        child: Text('Failed to load PDFs',
+            style: TextStyle(color: DS.textSecondary)),
+      ),
+      data: (pdfs) {
+        if (pdfs.isEmpty) {
+          return _EmptyTabState(
+            icon: Icons.picture_as_pdf_outlined,
+            message: 'No PDFs available yet',
+          );
+        }
+
+        final freePdfs = pdfs.where((p) => p.isFreePreview).toList();
+        final paidPdfs = pdfs.where((p) => !p.isFreePreview).toList();
+
+        return ListView(
+          padding: const EdgeInsets.all(DS.s16),
+          children: [
+            // Access banner for non-enrolled
+            if (!isEnrolled && paidPdfs.isNotEmpty) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: DS.s14, vertical: DS.s12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF7ED),
+                  borderRadius: BorderRadius.circular(DS.radiusMd),
+                  border: Border.all(
+                      color: DS.primary.withValues(alpha: 0.30)),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: DS.primary.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(DS.radiusSm),
+                      ),
+                      child: const Icon(Icons.lock_outline_rounded,
+                          color: DS.primary, size: 17),
+                    ),
+                    const SizedBox(width: DS.s10),
+                    const Expanded(
+                      child: Text(
+                        'Enroll to unlock all PDFs for this course.',
+                        style: TextStyle(
+                          color: DS.primary,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: DS.s16),
+            ],
+
+            // Free PDFs section
+            if (freePdfs.isNotEmpty) ...[
+              if (paidPdfs.isNotEmpty) ...[
+                _TabSectionLabel(label: 'Free PDFs'),
+                const SizedBox(height: DS.s10),
+              ],
+              ...freePdfs.map((pdf) => _PdfCard(
+                    item: pdf,
+                    canOpen: true,
+                  )),
+              if (paidPdfs.isNotEmpty) const SizedBox(height: DS.s20),
+            ],
+
+            // Paid PDFs section
+            if (paidPdfs.isNotEmpty) ...[
+              if (freePdfs.isNotEmpty) ...[
+                _TabSectionLabel(label: 'Course PDFs'),
+                const SizedBox(height: DS.s10),
+              ],
+              ...paidPdfs.map((pdf) => _PdfCard(
+                    item: pdf,
+                    canOpen: isEnrolled,
+                  )),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _PdfCard extends StatelessWidget {
+  final ContentItem item;
+  final bool canOpen;
+  const _PdfCard({required this.item, required this.canOpen});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: canOpen
+          ? () {
+              final url = item.fileUrl;
+              if (url == null || url.isEmpty) return;
+              Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) =>
+                    PdfViewerScreen(title: item.title, fileUrl: url),
+              ));
+            }
+          : () => ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Enroll in this course to access PDFs'),
+                  backgroundColor: DS.primary,
+                ),
+              ),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: DS.s10),
+        padding: const EdgeInsets.all(DS.s14),
+        decoration: BoxDecoration(
+          color: DS.surface,
+          borderRadius: BorderRadius.circular(DS.radiusMd),
+          border: Border.all(color: DS.border, width: 1.2),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.03),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            // Icon tile
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: canOpen ? DS.errorSurface : DS.surfaceVariant,
+                borderRadius: BorderRadius.circular(DS.radiusMd),
+              ),
+              child: Icon(
+                Icons.picture_as_pdf_rounded,
+                color: canOpen ? DS.error : DS.textHint,
+                size: 22,
+              ),
+            ),
+            const SizedBox(width: DS.s12),
+
+            // Title + free badge
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.title,
+                    style: TextStyle(
+                      color: canOpen ? DS.textPrimary : DS.textHint,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (item.isFreePreview) ...[
+                    const SizedBox(height: DS.s4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: DS.s8, vertical: DS.s2),
+                      decoration: BoxDecoration(
+                        color: DS.success.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: const Text(
+                        'Free',
+                        style: TextStyle(
+                          color: DS.success,
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+
+            const SizedBox(width: DS.s8),
+
+            // Action icon
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: canOpen ? DS.primaryLight : DS.surfaceVariant,
+                borderRadius: BorderRadius.circular(DS.radiusSm),
+              ),
+              child: Icon(
+                canOpen
+                    ? Icons.open_in_new_rounded
+                    : Icons.lock_outline_rounded,
+                color: canOpen ? DS.primary : DS.textHint,
+                size: 18,
+              ),
+            ),
           ],
         ),
       ),
@@ -1944,138 +1999,6 @@ class _TestChip extends StatelessWidget {
       ),
     ),
   );
-}
-
-// ─────────────────────────────────────────────
-// PDF NOTES TAB
-// ─────────────────────────────────────────────
-class _PdfsTab extends ConsumerWidget {
-  final AsyncValue<List<CoursePdf>> pdfsAsync;
-  final String courseId;
-  const _PdfsTab({required this.pdfsAsync, required this.courseId});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final isEnrolled =
-        ref.watch(isEnrolledProvider(courseId)).valueOrNull ?? false;
-
-    return pdfsAsync.when(
-      loading: () => const Center(
-        child: CircularProgressIndicator(color: DS.primary, strokeWidth: 2.5),
-      ),
-      error: (_, __) => const Center(
-        child: Text(
-          'Failed to load PDFs',
-          style: TextStyle(color: DS.textSecondary),
-        ),
-      ),
-      data: (pdfs) {
-        if (pdfs.isEmpty) {
-          return _EmptyTabState(
-            icon: Icons.picture_as_pdf_outlined,
-            message: 'No PDF notes yet',
-          );
-        }
-        return ListView.separated(
-          padding: const EdgeInsets.all(DS.s16),
-          itemCount: pdfs.length,
-          separatorBuilder: (_, __) => const SizedBox(height: DS.s10),
-          itemBuilder: (_, i) {
-            final pdf = pdfs[i];
-            final sizeKb = pdf.sizeBytes != null
-                ? '${(pdf.sizeBytes! / 1024).toStringAsFixed(0)} KB'
-                : '';
-
-            return InkWell(
-              onTap: isEnrolled
-                  ? () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => PdfViewerScreen(
-                          title: pdf.title,
-                          fileUrl: pdf.fileUrl,
-                        ),
-                      ),
-                    )
-                  : null,
-              borderRadius: BorderRadius.circular(DS.radiusMd),
-              child: Container(
-                padding: const EdgeInsets.all(DS.s14),
-                decoration: BoxDecoration(
-                  color: DS.surface,
-                  borderRadius: BorderRadius.circular(DS.radiusMd),
-                  border: Border.all(color: DS.border, width: 1.2),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.03),
-                      blurRadius: 6,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 44,
-                      height: 44,
-                      decoration: BoxDecoration(
-                        color: DS.errorSurface,
-                        borderRadius: BorderRadius.circular(DS.radiusMd),
-                      ),
-                      child: const Icon(
-                        Icons.picture_as_pdf_rounded,
-                        color: DS.error,
-                        size: 22,
-                      ),
-                    ),
-                    const SizedBox(width: DS.s12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            pdf.title,
-                            style: TextStyle(
-                              color: isEnrolled ? DS.textPrimary : DS.textHint,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 14,
-                            ),
-                          ),
-                          if (sizeKb.isNotEmpty)
-                            Text(
-                              sizeKb,
-                              style: const TextStyle(
-                                color: DS.textSecondary,
-                                fontSize: 12,
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: DS.s8),
-                    Container(
-                      width: 34,
-                      height: 34,
-                      decoration: BoxDecoration(
-                        color: isEnrolled ? DS.primaryLight : DS.surfaceVariant,
-                        borderRadius: BorderRadius.circular(DS.radiusSm),
-                      ),
-                      child: Icon(
-                        isEnrolled
-                            ? Icons.download_outlined
-                            : Icons.lock_outline_rounded,
-                        color: isEnrolled ? DS.primary : DS.textHint,
-                        size: 18,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
 }
 
 // ─────────────────────────────────────────────
@@ -2242,7 +2165,14 @@ class _EnrollBarState extends ConsumerState<_EnrollBar> {
           .enrollInCourse(widget.courseId);
       ref.invalidate(isEnrolledProvider(widget.courseId));
       ref.invalidate(enrollmentsProvider);
-      if (mounted) _showSuccessSheet();
+      ref.invalidate(courseEnrolledCountProvider(widget.courseId));
+      if (mounted) {
+        if (widget.course.isCourseFree) {
+          _showSnack('You\'re enrolled! Start learning now.');
+        } else {
+          _showSuccessSheet();
+        }
+      }
     } catch (e) {
       final msg = e is AppException ? e.userMessage : e.toString();
       if (mounted) _showSnack('Enrollment failed: $msg', error: true);
@@ -2274,19 +2204,28 @@ class _EnrollBarState extends ConsumerState<_EnrollBar> {
   }
 
   void _startPayment() {
-    final user = SupabaseService.client.auth.currentUser;
     if (widget.course.isCourseFree) {
-      // Free course — enroll directly without payment
       _onPaymentSuccess(PaymentSuccessResponse(null, null, null, null));
       return;
     }
+    final user = SupabaseService.client.auth.currentUser;
+    final prefs = ref.read(prefsProvider);
+    // For phone-auth users, phone is stored in prefs; real email users use auth fields
+    final phone = user?.phone?.isNotEmpty == true
+        ? user!.phone
+        : prefs.phoneNumber.isNotEmpty
+            ? prefs.phoneNumber
+            : null;
+    final name = prefs.userName.isNotEmpty
+        ? prefs.userName
+        : (user?.userMetadata?['full_name'] as String?);
     _rzp.openCheckout(
       amountInRupees: widget.course.salePrice,
       courseId: widget.courseId,
       courseName: widget.course.name,
       userEmail: user?.email,
-      userName: user?.userMetadata?['full_name'] as String?,
-      userPhone: user?.phone,
+      userName: name,
+      userPhone: phone,
     );
   }
 
@@ -2400,8 +2339,123 @@ class _EnrollBarState extends ConsumerState<_EnrollBar> {
         ],
       ),
       child: isEnrolled
-          ? SizedBox(
-              width: double.infinity,
+          ? _continueLearningButton()
+          : widget.course.isCourseFree
+              ? _enrollFreeButton()
+              : _paidEnrollRow(),
+    );
+  }
+
+  Widget _continueLearningButton() => SizedBox(
+        width: double.infinity,
+        height: 52,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFFFF8C38), DS.primary],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(DS.radiusMd),
+            boxShadow: [
+              BoxShadow(
+                color: DS.primary.withValues(alpha: 0.30),
+                blurRadius: 14,
+                offset: const Offset(0, 5),
+              ),
+            ],
+          ),
+          child: ElevatedButton.icon(
+            onPressed: () => context.push('/my-courses/${widget.courseId}'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.transparent,
+              shadowColor: Colors.transparent,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(DS.radiusMd),
+              ),
+            ),
+            icon: const Icon(Icons.play_arrow_rounded, size: 22),
+            label: const Text(
+              'Continue Learning',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+            ),
+          ),
+        ),
+      );
+
+  Widget _enrollFreeButton() => SizedBox(
+        width: double.infinity,
+        height: 52,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF34D399), DS.success],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(DS.radiusMd),
+            boxShadow: [
+              BoxShadow(
+                color: DS.success.withValues(alpha: 0.30),
+                blurRadius: 14,
+                offset: const Offset(0, 5),
+              ),
+            ],
+          ),
+          child: ElevatedButton.icon(
+            onPressed: _processing ? null : _startPayment,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.transparent,
+              shadowColor: Colors.transparent,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(DS.radiusMd),
+              ),
+            ),
+            icon: _processing
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      color: Colors.white,
+                      strokeWidth: 2.5,
+                    ),
+                  )
+                : const Icon(Icons.school_rounded, size: 22),
+            label: _processing
+                ? const Text(
+                    'Enrolling…',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                  )
+                : const Text(
+                    'Enroll Now',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                  ),
+          ),
+        ),
+      );
+
+  Widget _paidEnrollRow() => Row(
+        children: [
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '₹${widget.course.displayPrice.toStringAsFixed(0)}',
+                style: const TextStyle(
+                  color: DS.textPrimary,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -0.5,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(width: DS.s16),
+          Expanded(
+            child: SizedBox(
               height: 52,
               child: DecoratedBox(
                 decoration: BoxDecoration(
@@ -2413,15 +2467,14 @@ class _EnrollBarState extends ConsumerState<_EnrollBar> {
                   borderRadius: BorderRadius.circular(DS.radiusMd),
                   boxShadow: [
                     BoxShadow(
-                      color: DS.primary.withOpacity(0.30),
-                      blurRadius: 14,
+                      color: DS.primary.withValues(alpha: 0.28),
+                      blurRadius: 12,
                       offset: const Offset(0, 5),
                     ),
                   ],
                 ),
-                child: ElevatedButton.icon(
-                  onPressed: () =>
-                      context.push('/my-courses/${widget.courseId}'),
+                child: ElevatedButton(
+                  onPressed: _processing ? null : _startPayment,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.transparent,
                     shadowColor: Colors.transparent,
@@ -2430,104 +2483,35 @@ class _EnrollBarState extends ConsumerState<_EnrollBar> {
                       borderRadius: BorderRadius.circular(DS.radiusMd),
                     ),
                   ),
-                  icon: const Icon(Icons.play_arrow_rounded, size: 22),
-                  label: const Text(
-                    'Continue Learning',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-                  ),
+                  child: _processing
+                      ? const SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2.5,
+                          ),
+                        )
+                      : Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: const [
+                            Icon(Icons.payment_rounded, size: 20),
+                            SizedBox(width: DS.s8),
+                            Text(
+                              'Pay & Enroll',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                        ),
                 ),
               ),
-            )
-          : Row(
-              children: [
-                // Price
-                Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      widget.course.isCourseFree
-                          ? 'Free'
-                          : '₹${widget.course.displayPrice.toStringAsFixed(0)}',
-                      style: const TextStyle(
-                        color: DS.textPrimary,
-                        fontSize: 24,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: -0.5,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(width: DS.s16),
-
-                // Enroll / Pay button
-                Expanded(
-                  child: SizedBox(
-                    height: 52,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFFFF8C38), DS.primary],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        borderRadius: BorderRadius.circular(DS.radiusMd),
-                        boxShadow: [
-                          BoxShadow(
-                            color: DS.primary.withOpacity(0.28),
-                            blurRadius: 12,
-                            offset: const Offset(0, 5),
-                          ),
-                        ],
-                      ),
-                      child: ElevatedButton(
-                        onPressed: _processing ? null : _startPayment,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.transparent,
-                          shadowColor: Colors.transparent,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(DS.radiusMd),
-                          ),
-                        ),
-                        child: _processing
-                            ? const SizedBox(
-                                width: 22,
-                                height: 22,
-                                child: CircularProgressIndicator(
-                                  color: Colors.white,
-                                  strokeWidth: 2.5,
-                                ),
-                              )
-                            : Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    widget.course.isCourseFree
-                                        ? Icons.school_rounded
-                                        : Icons.payment_rounded,
-                                    size: 20,
-                                  ),
-                                  const SizedBox(width: DS.s8),
-                                  Text(
-                                    widget.course.isCourseFree
-                                        ? 'Enroll Free'
-                                        : 'Pay & Enroll',
-                                    style: const TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
             ),
-    );
-  }
+          ),
+        ],
+      );
 }
 
 // ─────────────────────────────────────────────

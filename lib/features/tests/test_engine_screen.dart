@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_html/flutter_html.dart';
 import 'package:flutter_math_fork/flutter_math.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/services/supabase_service.dart';
@@ -55,6 +54,8 @@ abstract class DS {
 
 // ─────────────────────────────────────────────
 // MATH-AWARE TEXT RENDERER
+// Handles plain text, LaTeX ($...$), and text
+// that has been mixed with HTML tags.
 // ─────────────────────────────────────────────
 class MathText extends StatelessWidget {
   final String text;
@@ -63,11 +64,28 @@ class MathText extends StatelessWidget {
 
   const MathText(this.text, {super.key, this.style, this.maxLines});
 
+  // Strip HTML tags and convert common ones to plain equivalents.
+  static String _stripHtml(String raw) {
+    return raw
+        .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
+        .replaceAll(RegExp(r'<p\s*/?>', caseSensitive: false), '')
+        .replaceAll(RegExp(r'</p>', caseSensitive: false), '\n')
+        .replaceAll(RegExp(r'<[^>]+>'), '')
+        .replaceAll('&nbsp;', ' ')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&amp;', '&')
+        .replaceAll('&quot;', '"')
+        .trim();
+  }
+
   @override
   Widget build(BuildContext context) {
     final base = style ?? DefaultTextStyle.of(context).style;
-    final parts = text.split(RegExp(r'\$'));
-    if (parts.length == 1) return Text(text, style: base, maxLines: maxLines);
+    // Always strip HTML so LaTeX inside HTML questions renders correctly.
+    final cleaned = _stripHtml(text);
+    final parts = cleaned.split(RegExp(r'\$'));
+    if (parts.length == 1) return Text(cleaned, style: base, maxLines: maxLines);
 
     final spans = <InlineSpan>[];
     for (int i = 0; i < parts.length; i++) {
@@ -1125,32 +1143,15 @@ class _QuestionTextCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // ── Question text ──
-          if (question.hasHtml)
-            LayoutBuilder(
-              builder: (context, constraints) => Html(
-                data: question.text,
-                shrinkWrap: true,
-                style: {
-                  'body': Style(
-                    fontSize: FontSize(15),
-                    color: DS.textPrimary,
-                    lineHeight: const LineHeight(1.6),
-                    margin: Margins.zero,
-                    padding: HtmlPaddings.zero,
-                  ),
-                  'strong': Style(fontWeight: FontWeight.w700),
-                },
-              ),
-            )
-          else
-            MathText(
-              question.text,
-              style: const TextStyle(
-                color: DS.textPrimary,
-                fontSize: 15.5,
-                height: 1.6,
-              ),
+          // MathText handles HTML stripping + LaTeX rendering for all cases.
+          MathText(
+            question.text,
+            style: const TextStyle(
+              color: DS.textPrimary,
+              fontSize: 15.5,
+              height: 1.6,
             ),
+          ),
 
           // ── Images (extracted from <img> tags) ──
           if (question.imageUrls.isNotEmpty) ...[

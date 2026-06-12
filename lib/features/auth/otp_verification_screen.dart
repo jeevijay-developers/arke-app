@@ -36,6 +36,7 @@ abstract class DS {
 
 class OtpVerificationScreen extends ConsumerStatefulWidget {
   final String email;
+
   /// True when coming from "Continue with Google" (uses signInWithOtp flow).
   /// False when coming from email signup (uses signUp flow).
   final bool isGoogleFlow;
@@ -54,8 +55,10 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
     with SingleTickerProviderStateMixin {
   static const _otpLength = 6;
 
-  final _controllers =
-      List.generate(_otpLength, (_) => TextEditingController());
+  final _controllers = List.generate(
+    _otpLength,
+    (_) => TextEditingController(),
+  );
   final _focusNodes = List.generate(_otpLength, (_) => FocusNode());
 
   bool _loading = false;
@@ -123,8 +126,9 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
     // Only keep last digit if somehow more than one char arrives
     final digit = value[value.length - 1];
     _controllers[index].text = digit;
-    _controllers[index].selection =
-        TextSelection.fromPosition(TextPosition(offset: 1));
+    _controllers[index].selection = TextSelection.fromPosition(
+      TextPosition(offset: 1),
+    );
 
     if (index < _otpLength - 1) {
       _focusNodes[index + 1].requestFocus();
@@ -162,10 +166,11 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
         await repo.updatePassword(pending);
         repo.pendingPassword = null;
       }
+      final hasProfile = await repo.restoreProfileFromDb();
       ref.read(passwordResetInProgressProvider.notifier).state = false;
       ref.read(authStateProvider.notifier).refresh();
       if (!mounted) return;
-      context.go('/home');
+      context.go(hasProfile ? '/home' : '/profile-setup');
     } catch (e) {
       ref.read(passwordResetInProgressProvider.notifier).state = false;
       final msg = AppException.from(e).userMessage;
@@ -174,7 +179,9 @@ class _OtpVerificationScreenState extends ConsumerState<OtpVerificationScreen>
             ? 'Invalid OTP. Please check the code and try again.'
             : msg;
       });
-      for (final c in _controllers) { c.clear(); }
+      for (final c in _controllers) {
+        c.clear();
+      }
       if (mounted) _focusNodes[0].requestFocus();
     } finally {
       if (mounted) setState(() => _loading = false);

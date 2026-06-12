@@ -61,6 +61,7 @@ class ProfileDashboardScreen extends ConsumerWidget {
     final prefs = ref.read(prefsProvider);
     final role = ref.watch(studentRoleProvider);
     final profile = ref.watch(userProfileProvider).valueOrNull;
+    final setupInfo = ref.watch(profileSetupInfoProvider);
 
     ref.listen<AsyncValue<bool>>(studentRoleProvider, (prev, next) {
       if (next.hasError && (prev == null || !prev.hasError)) {
@@ -70,13 +71,22 @@ class ProfileDashboardScreen extends ConsumerWidget {
       }
     });
 
-    // Prefer profiles table over auth metadata — profiles are always synced on save
-    final String name = profile?.fullName?.isNotEmpty == true
-        ? profile!.fullName!
-        : (user?.name ?? 'Learner');
+    // Priority: Supabase profile → prefs (phone-auth setup) → auth metadata
+    final String name = profile?.fullName?.trim().isNotEmpty == true
+        ? profile!.fullName!.trim()
+        : setupInfo.name.isNotEmpty
+            ? setupInfo.name
+            : (user?.name ?? 'Learner');
     final String email = user?.email ?? '—';
     final String initials = _initials(name);
     final String? avatarUrl = profile?.avatarUrl ?? user?.avatarUrl;
+    // Show class + exam from profile setup if available, else fall back to stored goal
+    final String goalTag = profile?.targetExam?.isNotEmpty == true
+        ? profile!.targetExam!
+        : setupInfo.exam.isNotEmpty
+            ? setupInfo.exam
+            : prefs.goal;
+    final String classTag = setupInfo.userClass;
 
     return PopScope(
       canPop: false,
@@ -97,7 +107,8 @@ class ProfileDashboardScreen extends ConsumerWidget {
                 email: email,
                 initials: initials,
                 avatarUrl: avatarUrl,
-                goal: profile?.targetExam ?? prefs.goal,
+                goal: goalTag,
+                classTag: classTag,
                 region: region,
                 onEdit: () => context.push('/edit-profile'),
               ),
@@ -217,7 +228,7 @@ class ProfileDashboardScreen extends ConsumerWidget {
 // SLIVER HEADER DELEGATE
 // ─────────────────────────────────────────────
 class _ProfileHeaderDelegate extends SliverPersistentHeaderDelegate {
-  final String name, email, initials, goal, region;
+  final String name, email, initials, goal, classTag, region;
   final String? avatarUrl;
   final VoidCallback onEdit;
 
@@ -227,6 +238,7 @@ class _ProfileHeaderDelegate extends SliverPersistentHeaderDelegate {
     required this.initials,
     required this.avatarUrl,
     required this.goal,
+    required this.classTag,
     required this.region,
     required this.onEdit,
   });
@@ -454,13 +466,18 @@ class _ProfileHeaderDelegate extends SliverPersistentHeaderDelegate {
                                   const SizedBox(height: DS.s8),
                                   Row(
                                     children: [
-                                      _Tag(label: goal),
-                                      const SizedBox(width: DS.s6),
-                                      _Tag(
-                                        label: region == 'AE'
-                                            ? '🇦🇪 Dubai'
-                                            : '🇮🇳 India',
-                                      ),
+                                      if (goal.isNotEmpty) ...[
+                                        _Tag(label: goal),
+                                        const SizedBox(width: DS.s6),
+                                      ],
+                                      if (classTag.isNotEmpty)
+                                        _Tag(label: classTag)
+                                      else
+                                        _Tag(
+                                          label: region == 'AE'
+                                              ? '🇦🇪 Dubai'
+                                              : '🇮🇳 India',
+                                        ),
                                     ],
                                   ),
                                 ],
@@ -504,6 +521,7 @@ class _ProfileHeaderDelegate extends SliverPersistentHeaderDelegate {
       email != old.email ||
       avatarUrl != old.avatarUrl ||
       goal != old.goal ||
+      classTag != old.classTag ||
       region != old.region;
 }
 

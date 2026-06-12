@@ -19,6 +19,9 @@ class Course extends Equatable {
   final int priority;
   final String? badge;
   final bool isActive;
+  final bool isFeatured;
+  final List<String> tags;
+  final double rating;
   final String? assignedTeacherId;
   final List<String> whatYoullLearn;
   final List<String> requirements;
@@ -45,6 +48,9 @@ class Course extends Equatable {
     this.priority = 0,
     this.badge,
     this.isActive = true,
+    this.isFeatured = false,
+    this.tags = const [],
+    this.rating = 0,
     this.assignedTeacherId,
     this.whatYoullLearn = const [],
     this.requirements = const [],
@@ -77,6 +83,9 @@ class Course extends Equatable {
         priority: _toInt(j['priority']) ?? 0,
         badge: j['badge'] as String?,
         isActive: j['is_active'] as bool? ?? true,
+        isFeatured: j['is_featured'] as bool? ?? false,
+        tags: _toStringList(j['tags']),
+        rating: _toDouble(j['rating']),
         assignedTeacherId: j['assigned_teacher_id'] as String?,
         whatYoullLearn: _toStringList(j['what_youll_learn']),
         requirements: _toStringList(j['requirements']),
@@ -100,5 +109,5 @@ class Course extends Equatable {
       (v as List<dynamic>?)?.map((e) => e.toString()).toList() ?? const [];
 
   @override
-  List<Object?> get props => [id, name, target, courseClass, salePrice];
+  List<Object?> get props => [id, name, target, courseClass, salePrice, isFeatured];
 }

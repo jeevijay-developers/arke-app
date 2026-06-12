@@ -1,6 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/supabase/supabase_client.dart';
+import '../../../core/storage/preferences.dart';
+import '../../../core/providers.dart';
 
 
 class AuthUser {
@@ -12,11 +15,150 @@ class AuthUser {
 }
 
 class AuthRepository {
+  final Prefs _prefs;
+  AuthRepository(this._prefs);
+
   User? get _user => supabaseOrNull?.auth.currentUser;
 
-  bool get isSignedIn => _user != null || _mockUser != null;
+  bool get isSignedIn => _user != null || _mockUser != null || _prefs.phoneSignedIn;
 
-  AuthUser? _mockUser;
+  AuthUser? _mockUser; // kept only as fallback when Supabase is unavailable
+
+  /// Step 1 — send 6-digit OTP to the phone via Twilio (configured in Supabase).
+  Future<void> sendPhoneOtp({required String phone}) async {
+    final sb = supabaseOrNull;
+    if (sb == null) return;
+    // Supabase expects E.164 format: +91XXXXXXXXXX
+    final e164 = phone.startsWith('+') ? phone : '+91$phone';
+    await sb.auth.signInWithOtp(phone: e164);
+  }
+
+  /// Check if a phone number already has a registered profile with completed
+  /// onboarding. Uses a SECURITY DEFINER RPC to bypass RLS (user not signed
+  /// in yet at this point). Called before OTP so routing is known upfront.
+  Future<bool> isPhoneRegistered({required String phone}) async {
+    final sb = supabaseOrNull;
+    if (sb == null) return false;
+    try {
+      final result = await sb.rpc('is_phone_registered', params: {'p_phone': phone});
+      final registered = result as bool? ?? false;
+      debugPrint('[Auth] isPhoneRegistered: phone=$phone → $registered');
+      return registered;
+    } catch (e) {
+      debugPrint('[Auth] isPhoneRegistered error: $e');
+      return false;
+    }
+  }
+
+  /// Step 2 — verify the OTP entered by the user and establish a session.
+  /// Returns true if the profile is already set up (returning user).
+  Future<bool> verifyPhoneOtp({
+    required String phone,
+    required String token,
+  }) async {
+    final sb = supabaseOrNull;
+    if (sb == null) return false;
+    final e164 = phone.startsWith('+') ? phone : '+91$phone';
+
+    // Sign out any stale session for a different number
+    final current = sb.auth.currentUser;
+    final currentPhone = current?.phone ?? '';
+    if (current != null && currentPhone != e164) {
+      await sb.auth.signOut();
+    }
+
+    await sb.auth.verifyOTP(phone: e164, token: token, type: OtpType.sms);
+
+    // Clear cached profile so we always re-check from DB
+    await _prefs.setProfileSetupDone(false);
+    await _prefs.setUserName('');
+    await _prefs.setUserClass('');
+    await _prefs.setUserExam('');
+    await _prefs.setPhoneNumber(phone);
+    await _prefs.setPhoneSignedIn(true);
+
+    // Small delay lets any DB trigger (auto-create profiles row) settle
+    // before we query — avoids race where maybeSingle() returns null for
+    // a row that was just being inserted.
+    await Future.delayed(const Duration(milliseconds: 300));
+
+    final hasProfile = await restoreProfileFromDb();
+    debugPrint('[Auth] verifyPhoneOtp → hasProfile=$hasProfile uid=${sb.auth.currentUser?.id}');
+    return hasProfile;
+  }
+
+  /// Called after OTP is verified.
+  /// Reuses the existing anonymous account for this phone if one exists,
+  /// otherwise creates a new anonymous session.
+  Future<void> setMockUser({required String phone}) async {
+    final sb = supabaseOrNull;
+    if (sb != null) {
+      final current = sb.auth.currentUser;
+      final currentPhone = current != null
+          ? (current.userMetadata?['phone'] as String? ?? '')
+          : '';
+
+      // Sign out if a different phone is signing in
+      if (current != null && currentPhone != phone) {
+        await sb.auth.signOut();
+      }
+
+      // Always clear cached profile state before checking DB below
+      await _prefs.setProfileSetupDone(false);
+      await _prefs.setUserName('');
+      await _prefs.setUserClass('');
+      await _prefs.setUserExam('');
+
+      // Create a new anonymous session only if none exists
+      if (sb.auth.currentUser == null) {
+        await sb.auth.signInAnonymously(data: {'phone': phone});
+      }
+
+      await _prefs.setPhoneNumber(phone);
+      await _prefs.setPhoneSignedIn(true);
+    } else {
+      _mockUser = AuthUser(
+        id: 'phone-${phone.hashCode}',
+        name: phone,
+      );
+      await _prefs.setProfileSetupDone(false);
+      await _prefs.setPhoneSignedIn(true);
+      await _prefs.setPhoneNumber(phone);
+    }
+  }
+
+  /// After sign-in, load profile from DB and sync to prefs.
+  /// Returns true if profile was found (returning user → skip setup).
+  Future<bool> restoreProfileFromDb() async {
+    final sb = supabaseOrNull;
+    if (sb == null) return false;
+    final uid = sb.auth.currentUser?.id;
+    if (uid == null) return false;
+    try {
+      final row = await sb
+          .from('profiles')
+          .select('full_name, class_level, target_exam, phone, onboarding_completed')
+          .eq('user_id', uid)
+          .maybeSingle();
+      debugPrint('[Auth] restoreProfileFromDb: uid=$uid row=$row');
+      if (row == null) return false;
+      final name      = row['full_name'] as String? ?? '';
+      final cls       = row['class_level'] as String? ?? '';
+      final exam      = row['target_exam'] as String? ?? '';
+      final completed = row['onboarding_completed'] as bool? ?? false;
+      debugPrint('[Auth] restoreProfileFromDb: name="$name" cls="$cls" completed=$completed');
+      // Use onboarding_completed as the definitive flag for returning users
+      if (!completed || name.isEmpty) return false;
+      await _prefs.setUserName(name);
+      await _prefs.setUserClass(cls);
+      await _prefs.setUserExam(exam);
+      await _prefs.setProfileSetupDone(true);
+      return true;
+    } catch (e) {
+      debugPrint('[Auth] restoreProfileFromDb ERROR: $e');
+      return false;
+    }
+  }
 
   // Temporarily holds the password chosen on signup form until OTP is verified
   // and updatePassword() is called from ResetPasswordScreen.
@@ -24,10 +166,15 @@ class AuthRepository {
 
   AuthUser? currentUser() {
     if (_user != null) {
+      // For anonymous phone-auth users, use stored phone as display name
+      final metaName = _user!.userMetadata?['full_name'] as String?;
+      final displayName = (metaName != null && metaName.isNotEmpty)
+          ? metaName
+          : (_prefs.phoneNumber.isNotEmpty ? _prefs.phoneNumber : null);
       return AuthUser(
         id: _user!.id,
         email: _user!.email,
-        name: _user!.userMetadata?['full_name'] as String?,
+        name: displayName,
         avatarUrl: _user!.userMetadata?['avatar_url'] as String?,
       );
     }
@@ -181,6 +328,9 @@ class AuthRepository {
 
   Future<void> signOut() async {
     _mockUser = null;
+    await _prefs.setPhoneSignedIn(false);
+    await _prefs.setPhoneNumber('');
+    await _prefs.setProfileSetupDone(false);
     await supabaseOrNull?.auth.signOut();
   }
 
@@ -193,8 +343,10 @@ class AuthRepository {
   }
 }
 
-final authRepositoryProvider =
-    Provider<AuthRepository>((ref) => AuthRepository());
+final authRepositoryProvider = Provider<AuthRepository>((ref) {
+  final prefs = ref.watch(prefsProvider);
+  return AuthRepository(prefs);
+});
 
 final authStateProvider =
     StateNotifierProvider<AuthStateNotifier, bool>((ref) {

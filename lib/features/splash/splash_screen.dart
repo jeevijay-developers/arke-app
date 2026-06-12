@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/providers.dart';
 import '../auth/data/auth_repository.dart';
+import '../enrollments/data/repositories/enrollments_repository.dart';
 
 // ─────────────────────────────────────────────
 // 💡 Move DS to lib/core/theme/design_system.dart
@@ -162,10 +163,21 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
   void _route() async {
     if (!mounted) return;
     final prefs = ref.read(prefsProvider);
-    final auth = ref.read(authRepositoryProvider);
-    if (!prefs.onboardingDone) await prefs.setOnboardingDone(true);
-    if (!mounted) return;
-    context.go(auth.isSignedIn ? '/home' : '/login');
+    final auth  = ref.read(authRepositoryProvider);
+    if (!prefs.onboardingDone) {
+      context.go('/onboarding');
+    } else if (auth.isSignedIn && !prefs.profileSetupDone) {
+      context.go('/profile-setup');
+    } else {
+      if (auth.isSignedIn && prefs.profileSetupDone) {
+        // Re-run auto-enrollment on every launch so new free courses are picked up
+        EnrollmentsRepository().autoEnrollFreeCourses(
+          exam: prefs.userExam,
+          userClass: prefs.userClass,
+        );
+      }
+      context.go(auth.isSignedIn ? '/courses' : '/login');
+    }
   }
 
   @override

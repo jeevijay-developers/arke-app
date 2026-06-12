@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import '../../core/providers.dart';
 import '../../skeleton_loading/home_skeleton.dart';
 import '../../core/widgets/async_value_widget.dart';
 import '../courses/data/courses_providers.dart';
@@ -55,6 +56,9 @@ class HomeScreen extends ConsumerWidget {
     final liveAsync = ref.watch(accessibleLiveClassesProvider);
     final coursesAsync = ref.watch(coursesProvider);
     final enrollmentsAsync = ref.watch(enrollmentsProvider);
+    final profileInfo = ref.watch(profileSetupInfoProvider);
+    final exam = profileInfo.exam;
+    final userClass = profileInfo.userClass;
     final showSkeleton =
         liveAsync.isLoading &&
         coursesAsync.isLoading &&
@@ -93,22 +97,11 @@ class HomeScreen extends ConsumerWidget {
                     isEmpty: (e) => e.isEmpty,
                     emptyMessage: 'You have not enrolled in any course yet.',
                     emptyIcon: Icons.school_outlined,
-                    data: (enrollments) {
-                      final last = enrollments.first;
-                      return Padding(
-                        padding: const EdgeInsets.fromLTRB(
-                          DS.s16,
-                          0,
-                          DS.s16,
-                          0,
-                        ),
-                        child: _ContinueCard(
-                          enrollment: last,
-                          onResume: () =>
-                              context.push('/my-courses/${last.courseId}'),
-                        ),
-                      );
-                    },
+                    data: (enrollments) => _EnrollmentCarousel(
+                      enrollments: enrollments,
+                      onResume: (e) =>
+                          context.push('/my-courses/${e.courseId}'),
+                    ),
                   ),
 
                   const SizedBox(height: DS.s24),
@@ -173,28 +166,21 @@ class HomeScreen extends ConsumerWidget {
                     emptyMessage: 'No courses available yet.',
                     emptyIcon: Icons.menu_book_outlined,
                     data: (courses) {
-                      final featured = courses.take(4).toList();
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: DS.s16),
-                        child: GridView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          itemCount: featured.length,
-                          gridDelegate:
-                              const SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: 2,
-                                childAspectRatio: 0.72,
-                                crossAxisSpacing: DS.s12,
-                                mainAxisSpacing: DS.s12,
-                              ),
-                          itemBuilder: (_, i) {
-                            final c = featured[i];
-                            return _CourseTile(
-                              course: c,
-                              onTap: () => context.push('/course/${c.id}'),
-                            );
-                          },
-                        ),
+                      final filtered = exam.isEmpty
+                          ? courses
+                          : exam == 'Foundation'
+                              ? courses.where((c) {
+                                  if (c.target != 'Foundation') return false;
+                                  if (userClass.isEmpty) return true;
+                                  final cls = userClass.replaceAll('th', '').replaceAll('st', '').replaceAll('nd', '').replaceAll('rd', '');
+                                  return c.courseClass == cls;
+                                }).toList()
+                              : courses.where((c) => c.target == exam).toList();
+                      final featured = filtered.take(6).toList();
+                      return _CoursesCarousel(
+                        courses: featured,
+                        onTap: (c) => context.push('/course/${c.id}'),
+                        onContinue: (c) => context.push('/my-courses/${c.id}'),
                       );
                     },
                   ),
@@ -277,6 +263,93 @@ class _SectionHeader extends StatelessWidget {
   }
 }
 
+// ── Carousel wrapper ────────────────────────────────────────────────────────
+class _EnrollmentCarousel extends StatefulWidget {
+  final List<Enrollment> enrollments;
+  final void Function(Enrollment) onResume;
+  const _EnrollmentCarousel({
+    required this.enrollments,
+    required this.onResume,
+  });
+
+  @override
+  State<_EnrollmentCarousel> createState() => _EnrollmentCarouselState();
+}
+
+class _EnrollmentCarouselState extends State<_EnrollmentCarousel> {
+  final _ctrl = PageController(viewportFraction: 0.92);
+  int _page = 0;
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final count = widget.enrollments.length;
+    final single = count == 1;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          // Fixed height so cards don't collapse inside the ListView
+          height: 168,
+          child: single
+              ? Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: DS.s16),
+                  child: _ContinueCard(
+                    enrollment: widget.enrollments.first,
+                    onResume: () =>
+                        widget.onResume(widget.enrollments.first),
+                  ),
+                )
+              : PageView.builder(
+                  controller: _ctrl,
+                  itemCount: count,
+                  onPageChanged: (i) => setState(() => _page = i),
+                  itemBuilder: (_, i) {
+                    final e = widget.enrollments[i];
+                    return Padding(
+                      padding: EdgeInsets.only(
+                        left: i == 0 ? DS.s16 : DS.s6,
+                        right: i == count - 1 ? DS.s16 : DS.s6,
+                      ),
+                      child: _ContinueCard(
+                        enrollment: e,
+                        onResume: () => widget.onResume(e),
+                      ),
+                    );
+                  },
+                ),
+        ),
+        if (!single) ...[
+          const SizedBox(height: DS.s12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(count, (i) {
+              final active = i == _page;
+              return AnimatedContainer(
+                duration: const Duration(milliseconds: 250),
+                margin: const EdgeInsets.symmetric(horizontal: 3),
+                width: active ? 18 : 6,
+                height: 6,
+                decoration: BoxDecoration(
+                  color: active ? DS.primary : DS.border,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              );
+            }),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+// ── Single course card ───────────────────────────────────────────────────────
 class _ContinueCard extends StatelessWidget {
   final Enrollment enrollment;
   final VoidCallback onResume;
@@ -285,8 +358,9 @@ class _ContinueCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final thumb = enrollment.courseThumbnailUrl ?? '';
-    final pct = enrollment.progressPercent;
-    return Container(
+    return GestureDetector(
+      onTap: onResume,
+      child: Container(
       decoration: BoxDecoration(
         color: DS.surface,
         borderRadius: BorderRadius.circular(DS.radiusLg),
@@ -299,169 +373,149 @@ class _ContinueCard extends StatelessWidget {
           ),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(DS.s16, DS.s14, DS.s16, 0),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: DS.s8,
-                    vertical: DS.s4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: DS.primaryLight,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.play_arrow_rounded,
-                        size: 12,
-                        color: DS.primary,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(DS.s14, DS.s14, DS.s14, DS.s14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            // Thumbnail
+            ClipRRect(
+              borderRadius: BorderRadius.circular(DS.radiusSm),
+              child: thumb.isNotEmpty
+                  ? CachedNetworkImage(
+                      imageUrl: thumb,
+                      width: 80,
+                      height: 100,
+                      fit: BoxFit.cover,
+                      placeholder: (ctx, url) => Container(
+                        width: 80,
+                        height: 100,
+                        color: DS.surfaceVariant,
                       ),
-                      SizedBox(width: DS.s4),
-                      Text(
-                        'Continue Learning',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
+                    )
+                  : Container(
+                      width: 80,
+                      height: 100,
+                      color: DS.surfaceVariant,
+                      child: const Icon(
+                        Icons.menu_book,
+                        color: DS.primary,
+                        size: 28,
+                      ),
+                    ),
+            ),
+            const SizedBox(width: DS.s14),
+            // Info + button
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // "Continue Learning" pill
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: DS.s8,
+                      vertical: DS.s4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: DS.primaryLight,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.play_arrow_rounded,
+                          size: 11,
                           color: DS.primary,
                         ),
-                      ),
-                    ],
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  '$pct% complete',
-                  style: const TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w600,
-                    color: DS.textSecondary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: DS.s12),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: DS.s16),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(DS.radiusSm),
-                  child: thumb.isNotEmpty
-                      ? CachedNetworkImage(
-                          imageUrl: thumb,
-                          width: 88,
-                          height: 66,
-                          fit: BoxFit.cover,
-                          placeholder: (_, _) => Container(
-                            width: 88,
-                            height: 66,
-                            color: DS.surfaceVariant,
-                          ),
-                        )
-                      : Container(
-                          width: 88,
-                          height: 66,
-                          color: DS.surfaceVariant,
-                          child: const Icon(Icons.menu_book, color: DS.primary),
-                        ),
-                ),
-                const SizedBox(width: DS.s12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        enrollment.courseTitle ?? 'Course',
-                        style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          color: DS.textPrimary,
-                          letterSpacing: -0.2,
-                          height: 1.3,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      if (enrollment.courseSubject != null) ...[
-                        const SizedBox(height: DS.s4),
+                        SizedBox(width: 3),
                         Text(
-                          enrollment.courseSubject!,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: DS.textSecondary,
+                          'Continue Learning',
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w700,
+                            color: DS.primary,
                           ),
                         ),
                       ],
-                    ],
+                    ),
                   ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: DS.s14),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: DS.s16),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(999),
-              child: LinearProgressIndicator(
-                value: enrollment.progressFraction,
-                minHeight: 5,
-                backgroundColor: DS.border,
-                color: DS.primary,
-              ),
-            ),
-          ),
-          const SizedBox(height: DS.s14),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(DS.s16, 0, DS.s16, DS.s16),
-            child: SizedBox(
-              height: 44,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFFFF8C38), DS.primary],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
+                  const SizedBox(height: DS.s8),
+                  // Course title
+                  Text(
+                    enrollment.courseTitle ?? 'Course',
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: DS.textPrimary,
+                      letterSpacing: -0.2,
+                      height: 1.3,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  borderRadius: BorderRadius.circular(DS.radiusMd),
-                  boxShadow: [
-                    BoxShadow(
-                      color: DS.primary.withValues(alpha: 0.30),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
+                  if (enrollment.courseSubject != null) ...[
+                    const SizedBox(height: DS.s4),
+                    Text(
+                      enrollment.courseSubject!,
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        color: DS.textSecondary,
+                      ),
                     ),
                   ],
-                ),
-                child: ElevatedButton.icon(
-                  onPressed: onResume,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.transparent,
-                    shadowColor: Colors.transparent,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(DS.radiusMd),
+                  const SizedBox(height: DS.s10),
+                  // Resume button
+                  SizedBox(
+                    height: 36,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFFFF8C38), DS.primary],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(DS.radiusSm),
+                        boxShadow: [
+                          BoxShadow(
+                            color: DS.primary.withValues(alpha: 0.28),
+                            blurRadius: 8,
+                            offset: const Offset(0, 3),
+                          ),
+                        ],
+                      ),
+                      child: ElevatedButton.icon(
+                        onPressed: onResume,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.transparent,
+                          shadowColor: Colors.transparent,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: DS.s12,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(DS.radiusSm),
+                          ),
+                        ),
+                        icon: const Icon(Icons.play_arrow_rounded, size: 16),
+                        label: const Text(
+                          'Resume',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
                     ),
                   ),
-                  icon: const Icon(Icons.play_arrow_rounded, size: 18),
-                  label: const Text(
-                    'Resume',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
-                  ),
-                ),
+                ],
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
+    ),
     );
   }
 }
@@ -666,13 +720,24 @@ class _StatusBadge extends StatelessWidget {
   }
 }
 
-class _CourseTile extends StatelessWidget {
+class _CourseTile extends ConsumerWidget {
   final Course course;
   final VoidCallback onTap;
-  const _CourseTile({required this.course, required this.onTap});
+  final VoidCallback onContinue;
+  const _CourseTile({
+    required this.course,
+    required this.onTap,
+    required this.onContinue,
+  });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isEnrolled =
+        ref.watch(isEnrolledProvider(course.id)).valueOrNull ?? false;
+    final canContinue = isEnrolled || course.isCourseFree;
+    final hasThumbnail =
+        course.thumbnailUrl != null && course.thumbnailUrl!.isNotEmpty;
+
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -682,121 +747,130 @@ class _CourseTile extends StatelessWidget {
           border: Border.all(color: DS.border, width: 1.2),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.04),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
             ),
           ],
         ),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // ── Thumbnail ────────────────────────────────────────────────
             ClipRRect(
               borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(DS.radiusLg),
               ),
               child: AspectRatio(
-                aspectRatio: 16 / 10,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    if (course.thumbnailUrl != null && course.thumbnailUrl!.isNotEmpty)
-                      CachedNetworkImage(
+                aspectRatio: 16 / 11,
+                child: hasThumbnail
+                    ? CachedNetworkImage(
                         imageUrl: course.thumbnailUrl!,
                         fit: BoxFit.cover,
-                        errorWidget: (_, __, ___) =>
-                            Container(color: DS.surfaceVariant),
+                        errorWidget: (ctx, url, err) =>
+                            _ThumbPlaceholder(),
                       )
-                    else
-                      Container(color: DS.surfaceVariant),
-                    if (course.isCourseFree)
-                      Positioned(
-                        top: DS.s8,
-                        left: DS.s8,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: DS.s8,
-                            vertical: DS.s4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: DS.success,
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: const Text(
-                            'FREE',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 9,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 0.5,
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
+                    : _ThumbPlaceholder(),
               ),
             ),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(DS.s10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      course.name,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: DS.textPrimary,
-                        letterSpacing: -0.1,
-                        height: 1.3,
+
+            // ── Info ─────────────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(DS.s10, DS.s10, DS.s10, DS.s10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Badge chips
+                  Wrap(
+                    spacing   : 4,
+                    runSpacing: 4,
+                    children  : [
+                      _Chip(
+                        'Cl. ${course.courseClass}',
+                        bg: const Color(0xFFEEF2FF),
+                        fg: const Color(0xFF6366F1),
                       ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: DS.s4),
-                    Text(
-                      course.teacherName ?? '',
-                      style: const TextStyle(
-                        fontSize: 11.5,
-                        color: DS.textSecondary,
+                      _Chip(
+                        course.target,
+                        bg: const Color(0xFFFFF0E6),
+                        fg: DS.primary,
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      if (course.isCourseFree)
+                        _Chip('Free', bg: const Color(0xFFECFDF5), fg: DS.success),
+                      if (course.isFeatured)
+                        _Chip('Featured', bg: const Color(0xFFFFFBEB), fg: DS.warning),
+                    ],
+                  ),
+                  const SizedBox(height: DS.s8),
+
+                  // Course name
+                  Text(
+                    course.name,
+                    style: const TextStyle(
+                      fontSize  : 13,
+                      fontWeight: FontWeight.w800,
+                      color     : DS.textPrimary,
+                      letterSpacing: -0.2,
+                      height    : 1.3,
                     ),
-                    const Spacer(),
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.star_rounded,
-                          size: 13,
-                          color: Color(0xFFF59E0B),
+                    maxLines : 2,
+                    overflow : TextOverflow.ellipsis,
+                  ),
+
+                  const SizedBox(height: DS.s8),
+
+                  // CTA button
+                  SizedBox(
+                    width : double.infinity,
+                    height: 36,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: canContinue
+                              ? [const Color(0xFF34D399), DS.success]
+                              : [const Color(0xFFFF8C38), DS.primary],
+                          begin: Alignment.topLeft,
+                          end  : Alignment.bottomRight,
                         ),
-                        const SizedBox(width: DS.s4),
-                        Text(
-                          '4.5',
-                          style: const TextStyle(
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w600,
-                            color: DS.textPrimary,
+                        borderRadius: BorderRadius.circular(DS.radiusSm),
+                        boxShadow: [
+                          BoxShadow(
+                            color: (canContinue ? DS.success : DS.primary)
+                                .withValues(alpha: 0.25),
+                            blurRadius: 6,
+                            offset    : const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: ElevatedButton.icon(
+                        onPressed: canContinue ? onContinue : onTap,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.transparent,
+                          shadowColor    : Colors.transparent,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: DS.s8),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(DS.radiusSm),
                           ),
                         ),
-                        const Spacer(),
-                        Text(
-                          course.isCourseFree
-                              ? 'Free'
-                              : '₹${course.displayPrice.toStringAsFixed(0)}',
+                        icon : Icon(
+                          canContinue
+                              ? Icons.play_arrow_rounded
+                              : Icons.school_rounded,
+                          size: 15,
+                        ),
+                        label: Text(
+                          canContinue ? 'Continue' : 'Enroll Now',
                           style: const TextStyle(
-                            color: DS.primary,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 12.5,
+                            fontSize  : 11.5,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
-                      ],
+                      ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -804,4 +878,151 @@ class _CourseTile extends StatelessWidget {
       ),
     );
   }
+}
+
+// ── Recommended courses carousel (2 cards per page) ───────────────────────
+class _CoursesCarousel extends StatefulWidget {
+  final List<Course> courses;
+  final void Function(Course) onTap;
+  final void Function(Course) onContinue;
+
+  const _CoursesCarousel({
+    required this.courses,
+    required this.onTap,
+    required this.onContinue,
+  });
+
+  @override
+  State<_CoursesCarousel> createState() => _CoursesCarouselState();
+}
+
+class _CoursesCarouselState extends State<_CoursesCarousel> {
+  final _ctrl = PageController();
+  int _page = 0;
+
+  // Group the flat list into pairs: [[c0,c1],[c2,c3],…]
+  List<List<Course>> get _pages {
+    final pages = <List<Course>>[];
+    for (var i = 0; i < widget.courses.length; i += 2) {
+      pages.add(widget.courses.sublist(
+        i,
+        (i + 2).clamp(0, widget.courses.length),
+      ));
+    }
+    return pages;
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pages = _pages;
+    if (pages.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          height: 300,
+          child: PageView.builder(
+            controller  : _ctrl,
+            itemCount   : pages.length,
+            onPageChanged: (i) => setState(() => _page = i),
+            itemBuilder : (_, i) {
+              final pair = pages[i];
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: DS.s16),
+                child: IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(
+                        child: _CourseTile(
+                          course    : pair[0],
+                          onTap     : () => onTap(pair[0]),
+                          onContinue: () => onContinue(pair[0]),
+                        ),
+                      ),
+                      if (pair.length > 1) ...[
+                        const SizedBox(width: DS.s10),
+                        Expanded(
+                          child: _CourseTile(
+                            course    : pair[1],
+                            onTap     : () => onTap(pair[1]),
+                            onContinue: () => onContinue(pair[1]),
+                          ),
+                        ),
+                      ] else
+                        const Expanded(child: SizedBox.shrink()),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        if (pages.length > 1) ...[
+          const SizedBox(height: DS.s12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(pages.length, (i) {
+              final active = i == _page;
+              return AnimatedContainer(
+                duration: const Duration(milliseconds: 250),
+                margin: const EdgeInsets.symmetric(horizontal: 3),
+                width : active ? 18 : 6,
+                height: 6,
+                decoration: BoxDecoration(
+                  color       : active ? DS.primary : DS.border,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              );
+            }),
+          ),
+          const SizedBox(height: DS.s4),
+        ],
+      ],
+    );
+  }
+
+  void onTap(Course c)      => widget.onTap(c);
+  void onContinue(Course c) => widget.onContinue(c);
+}
+
+class _ThumbPlaceholder extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => Container(
+        color: DS.surfaceVariant,
+        child: const Center(
+          child: Icon(Icons.menu_book_rounded, color: DS.primary, size: 36),
+        ),
+      );
+}
+
+class _Chip extends StatelessWidget {
+  final String label;
+  final Color bg;
+  final Color fg;
+  const _Chip(this.label, {required this.bg, required this.fg});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 10.5,
+            fontWeight: FontWeight.w700,
+            color: fg,
+          ),
+        ),
+      );
 }

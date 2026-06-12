@@ -17,7 +17,8 @@ class CoursesRepository {
             'id, name, internal_name, description, thumbnail_url, target, "class", '
             'language, mrp, sale_price, discount_percent, show_price_with_gst, '
             'is_course_free, max_usage_days, course_end_date, priority, badge, '
-            'is_active, assigned_teacher_id, what_youll_learn, requirements',
+            'is_active, is_featured, tags, rating, '
+            'assigned_teacher_id, what_youll_learn, requirements',
           )
           .eq('is_active', true)
           .order('priority');

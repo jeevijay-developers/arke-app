@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../auth/data/auth_repository.dart';
 import '../dashboard/widgets/dashboard_drawer.dart';
 import '../profile/data/profile_providers.dart';
+import '../../core/providers.dart';
 
 // ─────────────────────────────────────────────
 // 💡 Move DS to lib/core/theme/design_system.dart
@@ -103,9 +104,12 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   Widget build(BuildContext context) {
     final user = ref.watch(authRepositoryProvider).currentUser();
     final profile = ref.watch(userProfileProvider).valueOrNull;
+    final setupInfo = ref.watch(profileSetupInfoProvider);
     final displayName = profile?.fullName?.trim().isNotEmpty == true
         ? profile!.fullName!.trim()
-        : (user?.name?.trim().isNotEmpty == true ? user!.name!.trim() : 'Learner');
+        : setupInfo.name.isNotEmpty
+            ? setupInfo.name
+            : (user?.name?.trim().isNotEmpty == true ? user!.name!.trim() : 'Learner');
     final initials = _initials(displayName);
     final currentIdx = _index;
 
@@ -115,10 +119,10 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         statusBarIconBrightness: Brightness.dark,
       ),
       child: PopScope(
-        canPop: widget.location == '/home',
+        canPop: widget.location == '/courses',
         onPopInvokedWithResult: (didPop, _) {
-          if (!didPop && widget.location != '/home') {
-            context.go('/home');
+          if (!didPop && widget.location != '/courses') {
+            context.go('/courses');
           }
         },
         child: Scaffold(
