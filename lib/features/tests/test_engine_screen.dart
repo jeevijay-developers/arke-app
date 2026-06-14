@@ -79,11 +79,49 @@ class MathText extends StatelessWidget {
         .trim();
   }
 
+  // Normalise all LaTeX delimiter styles to $...$ so the splitter works uniformly.
+  static String _normalizeMath(String s) {
+    // \[...\]  → $...$
+    s = s.replaceAllMapped(
+      RegExp(r'\\\[([\s\S]*?)\\\]'),
+      (m) => '\$${m.group(1)}\$',
+    );
+    // \(...\)  → $...$
+    s = s.replaceAllMapped(
+      RegExp(r'\\\(([\s\S]*?)\\\)'),
+      (m) => '\$${m.group(1)}\$',
+    );
+    // Bare LaTeX segments with no delimiters: consecutive tokens that contain
+    // backslash-commands (\text, \frac, \Lambda, etc.) are merged and wrapped
+    // in $...$. Pure-prose words are left as TextSpan.
+    // Strategy: split each line into runs of "math tokens" vs "prose tokens"
+    // and wrap math runs in $...$, leaving prose untouched.
+    final latexToken = RegExp(r'\\[a-zA-Z]');
+    final lines = s.split('\n');
+    final result = lines.map((line) {
+      if (line.contains('\$')) return line; // already delimited
+      if (!latexToken.hasMatch(line)) return line; // pure prose
+      // Tokenise on whitespace, group consecutive math tokens, wrap them.
+      final tokens = line.split(RegExp(r'(?<=\S)(?=\s)|(?<=\s)(?=\S)'));
+      final buf = StringBuffer();
+      bool inMath = false;
+      for (final tok in tokens) {
+        final isMath = latexToken.hasMatch(tok);
+        if (isMath && !inMath) { buf.write('\$'); inMath = true; }
+        if (!isMath && inMath) { buf.write('\$'); inMath = false; }
+        buf.write(tok);
+      }
+      if (inMath) buf.write('\$');
+      return buf.toString();
+    }).join('\n');
+    return result;
+  }
+
   @override
   Widget build(BuildContext context) {
     final base = style ?? DefaultTextStyle.of(context).style;
-    // Always strip HTML so LaTeX inside HTML questions renders correctly.
-    final cleaned = _stripHtml(text);
+    // Strip HTML, then normalise LaTeX delimiters before splitting on $.
+    final cleaned = _normalizeMath(_stripHtml(text));
     final parts = cleaned.split(RegExp(r'\$'));
     if (parts.length == 1) return Text(cleaned, style: base, maxLines: maxLines);
 

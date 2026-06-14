@@ -111,18 +111,6 @@ class _DashboardDrawerState extends State<DashboardDrawer>
         '/live',
         const Color(0xFFEF4444),
       ),
-      _DrawerItem(
-        Icons.assignment_outlined,
-        'Tests',
-        '/tests',
-        const Color(0xFF10B981),
-      ),
-      _DrawerItem(
-        Icons.favorite_outlined,
-        'Favourites',
-        '/favourites',
-        const Color(0xFFFF4D6D),
-      ),
     ]),
     _DrawerSection('Explore', [
       _DrawerItem(

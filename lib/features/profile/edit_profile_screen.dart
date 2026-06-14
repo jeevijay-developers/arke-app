@@ -8,6 +8,7 @@ import '../../core/supabase/supabase_client.dart';
 import '../auth/data/auth_repository.dart';
 import '../auth/data/models/user_profile.dart';
 import '../auth/data/repositories/user_repository.dart';
+import '../enrollments/data/repositories/enrollments_repository.dart';
 import '../profile/data/profile_providers.dart';
 
 abstract class DS {
@@ -193,6 +194,17 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen>
           'full_name': updated.fullName ?? '',
           if (updated.avatarUrl != null) 'avatar_url': updated.avatarUrl,
         }));
+        // Sync exam + class to prefs so courses list re-filters immediately
+        final prefs = ref.read(prefsProvider);
+        if (updated.targetExam != null) await prefs.setUserExam(updated.targetExam!);
+        if (updated.classLevel != null) await prefs.setUserClass(updated.classLevel!);
+        // Auto-enroll in any new free courses matching the updated exam + class
+        if (updated.targetExam != null && updated.targetExam!.isNotEmpty) {
+          await EnrollmentsRepository().autoEnrollFreeCourses(
+            exam: updated.targetExam!,
+            userClass: updated.classLevel ?? '',
+          );
+        }
         // Update fields immediately from the saved values — no waiting for DB round-trip.
         // _profileLoaded stays true so the provider refresh doesn't overwrite the fields.
         setState(() {
@@ -200,7 +212,6 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen>
           _phoneCtrl.text = updated.phone ?? _phoneCtrl.text;
           _cityCtrl.text = updated.city ?? _cityCtrl.text;
           _stateCtrl.text = updated.state ?? _stateCtrl.text;
-          _countryCtrl.text = updated.country ?? _countryCtrl.text;
           _classLevel = updated.classLevel;
           _targetExam = updated.targetExam;
           _schoolId = updated.schoolId;
@@ -208,6 +219,8 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen>
         });
         _profileLoaded = true;
         ref.invalidate(userProfileProvider);
+        // Invalidate course providers so the list re-fetches with the new filter
+        ref.invalidate(profileSetupInfoProvider);
       }
       if (_goal != null) ref.read(prefsProvider).setGoal(_goal!);
       if (!mounted) return;
@@ -278,8 +291,6 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen>
 
   @override
   Widget build(BuildContext context) {
-    final email = ref.watch(authRepositoryProvider).currentUser()?.email ?? '';
-
     // Populate once when profile loads
     ref.listen<AsyncValue<UserProfile?>>(userProfileProvider, (prev, next) {
       final profile = next.valueOrNull;
@@ -318,8 +329,6 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen>
                       phoneCtrl: _phoneCtrl,
                       cityCtrl: _cityCtrl,
                       stateCtrl: _stateCtrl,
-                      countryCtrl: _countryCtrl,
-                      email: email,
                       classLevel: _classLevel,
                       targetExam: _targetExam,
                       schoolId: _schoolId,
@@ -582,8 +591,6 @@ class _ContentCard extends ConsumerWidget {
   final TextEditingController phoneCtrl;
   final TextEditingController cityCtrl;
   final TextEditingController stateCtrl;
-  final TextEditingController countryCtrl;
-  final String email;
   final String? classLevel;
   final String? targetExam;
   final String? schoolId;
@@ -600,8 +607,6 @@ class _ContentCard extends ConsumerWidget {
     required this.phoneCtrl,
     required this.cityCtrl,
     required this.stateCtrl,
-    required this.countryCtrl,
-    required this.email,
     required this.classLevel,
     required this.targetExam,
     required this.schoolId,
@@ -683,16 +688,6 @@ class _ContentCard extends ConsumerWidget {
             ),
             const SizedBox(height: DS.s12),
 
-            // Email — read-only
-            _AppField(
-              controller: TextEditingController(text: email),
-              label: 'Email',
-              hint: '',
-              icon: Icons.email_outlined,
-              readOnly: true,
-            ),
-            const SizedBox(height: DS.s12),
-
             _AppField(
               controller: phoneCtrl,
               label: 'Phone Number',
@@ -702,47 +697,26 @@ class _ContentCard extends ConsumerWidget {
             ),
             const SizedBox(height: DS.s12),
 
-            // Target Exam dropdown
+            // Target Exam dropdown — values must match profile_setup_screen _kExams
             _DropdownField<String>(
               value: targetExam,
               hint: 'Select your target exam',
               label: 'Target Exam',
               icon: Icons.emoji_events_outlined,
-              items: const [
-                'JEE Main',
-                'JEE Advanced',
-                'NEET',
-                'Boards',
-                'Foundation',
-              ],
-              labels: const [
-                'JEE Main',
-                'JEE Advanced',
-                'NEET',
-                'Boards',
-                'Foundation',
-              ],
+              items: const ['JEE', 'NEET', 'Foundation'],
+              labels: const ['JEE', 'NEET', 'Foundation'],
               onChanged: onTargetExamChanged,
             ),
             const SizedBox(height: DS.s12),
 
-            // Class Level dropdown
+            // Class Level dropdown — values must match profile_setup_screen class lists
             _DropdownField<String>(
               value: classLevel,
               hint: 'Select your class',
               label: 'Class Level',
               icon: Icons.class_outlined,
-              items: const ['6', '7', '8', '9', '10', '11', '12', 'Dropper'],
-              labels: const [
-                'Class 6',
-                'Class 7',
-                'Class 8',
-                'Class 9',
-                'Class 10',
-                'Class 11',
-                'Class 12',
-                'Dropper',
-              ],
+              items: const ['8th', '9th', '10th', '11th', '12th', 'Dropper'],
+              labels: const ['Class 8', 'Class 9', 'Class 10', 'Class 11', 'Class 12', 'Dropper'],
               onChanged: onClassLevelChanged,
             ),
             const SizedBox(height: DS.s12),
@@ -768,14 +742,6 @@ class _ContentCard extends ConsumerWidget {
                   ),
                 ),
               ],
-            ),
-            const SizedBox(height: DS.s12),
-
-            _AppField(
-              controller: countryCtrl,
-              label: 'Country',
-              hint: 'Your country',
-              icon: Icons.public_outlined,
             ),
             const SizedBox(height: DS.s12),
 

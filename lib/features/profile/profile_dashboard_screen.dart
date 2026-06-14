@@ -5,7 +5,6 @@ import '../../core/providers.dart';
 import '../auth/data/auth_repository.dart';
 import '../auth/data/student_role_provider.dart';
 import '../profile/data/profile_providers.dart';
-import '../enrollments/data/enrollments_providers.dart';
 
 // ─────────────────────────────────────────────
 // 💡 Move DS to lib/core/theme/design_system.dart
@@ -75,8 +74,8 @@ class ProfileDashboardScreen extends ConsumerWidget {
     final String name = profile?.fullName?.trim().isNotEmpty == true
         ? profile!.fullName!.trim()
         : setupInfo.name.isNotEmpty
-            ? setupInfo.name
-            : (user?.name ?? 'Learner');
+        ? setupInfo.name
+        : (user?.name ?? 'Learner');
     final String email = user?.email ?? '—';
     final String initials = _initials(name);
     final String? avatarUrl = profile?.avatarUrl ?? user?.avatarUrl;
@@ -84,8 +83,8 @@ class ProfileDashboardScreen extends ConsumerWidget {
     final String goalTag = profile?.targetExam?.isNotEmpty == true
         ? profile!.targetExam!
         : setupInfo.exam.isNotEmpty
-            ? setupInfo.exam
-            : prefs.goal;
+        ? setupInfo.exam
+        : prefs.goal;
     final String classTag = setupInfo.userClass;
 
     return PopScope(
@@ -133,37 +132,6 @@ class ProfileDashboardScreen extends ConsumerWidget {
                     ),
                     const SizedBox(height: DS.s20),
                   ],
-
-                  // ── Stats grid ──
-                  _SectionHeader(title: 'My Stats'),
-                  const SizedBox(height: DS.s12),
-                  _StatsGrid(),
-                  const SizedBox(height: DS.s24),
-
-                  // ── Enrolled courses ──
-                  _SectionHeader(
-                    title: 'Enrolled Courses',
-                    action: TextButton(
-                      onPressed: () => context.push('/courses'),
-                      style: TextButton.styleFrom(
-                        foregroundColor: DS.primary,
-                        padding: EdgeInsets.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      child: const Text(
-                        'See all',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: DS.s12),
-                  _EnrolledCourses(
-                    onCourseTap: (id) => context.push('/course/$id'),
-                  ),
-                  const SizedBox(height: DS.s24),
 
                   // ── Quick links ──
                   _SectionHeader(title: 'Quick Links'),
@@ -453,16 +421,6 @@ class _ProfileHeaderDelegate extends SliverPersistentHeaderDelegate {
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                   ),
-                                  const SizedBox(height: DS.s4),
-                                  Text(
-                                    email,
-                                    style: TextStyle(
-                                      fontSize: 12.5,
-                                      color: Colors.white.withOpacity(0.75),
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
                                   const SizedBox(height: DS.s8),
                                   Row(
                                     children: [
@@ -577,8 +535,7 @@ class _HeaderAvatar extends StatelessWidget {
 // ─────────────────────────────────────────────
 class _SectionHeader extends StatelessWidget {
   final String title;
-  final Widget? action;
-  const _SectionHeader({required this.title, this.action});
+  const _SectionHeader({required this.title});
 
   @override
   Widget build(BuildContext context) {
@@ -602,8 +559,6 @@ class _SectionHeader extends StatelessWidget {
             letterSpacing: -0.2,
           ),
         ),
-        const Spacer(),
-        if (action != null) action!,
       ],
     );
   }
@@ -724,316 +679,6 @@ class _ShimmerCTA extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────
-// STATS GRID
-// ─────────────────────────────────────────────
-class _StatsGrid extends ConsumerWidget {
-  const _StatsGrid();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final statsAsync = ref.watch(profileStatsProvider);
-
-    return statsAsync.when(
-      loading: () => GridView.builder(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          childAspectRatio: 1.65,
-          crossAxisSpacing: DS.s12,
-          mainAxisSpacing: DS.s12,
-        ),
-        itemCount: 4,
-        itemBuilder: (context2, i2) => _StatShimmerCard(),
-      ),
-      error: (e2, st2) => const SizedBox.shrink(),
-      data: (stats) {
-        final items = [
-          _StatData(
-            icon: Icons.timer_outlined,
-            label: 'Hours Studied',
-            value: '${stats.hoursStudied}h',
-            color: const Color(0xFF6366F1),
-          ),
-          _StatData(
-            icon: Icons.quiz_outlined,
-            label: 'Tests Attempted',
-            value: '${stats.testsAttempted}',
-            color: const Color(0xFFF97315),
-          ),
-          _StatData(
-            icon: Icons.menu_book_outlined,
-            label: 'Enrolled',
-            value: '${stats.enrolledCourses}',
-            color: const Color(0xFF10B981),
-          ),
-          _StatData(
-            icon: Icons.local_fire_department,
-            label: 'Day Streak',
-            value: '${stats.dayStreak}d',
-            color: const Color(0xFFEF4444),
-          ),
-        ];
-        return GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            childAspectRatio: 1.65,
-            crossAxisSpacing: DS.s12,
-            mainAxisSpacing: DS.s12,
-          ),
-          itemCount: items.length,
-          itemBuilder: (_, i) => _StatCard(data: items[i]),
-        );
-      },
-    );
-  }
-}
-
-class _StatData {
-  final IconData icon;
-  final String label, value;
-  final Color color;
-  const _StatData({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.color,
-  });
-}
-
-class _StatCard extends StatelessWidget {
-  final _StatData data;
-  const _StatCard({required this.data});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(DS.s14),
-      decoration: BoxDecoration(
-        color: DS.surface,
-        borderRadius: BorderRadius.circular(DS.radiusMd),
-        border: Border.all(color: DS.border, width: 1.2),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: data.color.withOpacity(0.10),
-              borderRadius: BorderRadius.circular(DS.radiusSm),
-            ),
-            child: Icon(data.icon, color: data.color, size: 20),
-          ),
-          const SizedBox(width: DS.s10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  data.value,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                    color: DS.textPrimary,
-                    letterSpacing: -0.5,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  data.label,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: DS.textSecondary,
-                    fontWeight: FontWeight.w500,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────
-// STAT SHIMMER CARD
-// ─────────────────────────────────────────────
-class _StatShimmerCard extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(DS.s14),
-      decoration: BoxDecoration(
-        color: DS.border.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(DS.radiusMd),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────
-// ENROLLED COURSES
-// ─────────────────────────────────────────────
-class _EnrolledCourses extends ConsumerWidget {
-  final ValueChanged<String> onCourseTap;
-  const _EnrolledCourses({required this.onCourseTap});
-
-  static const _colors = [
-    Color(0xFF6366F1),
-    Color(0xFFF97315),
-    Color(0xFF10B981),
-    Color(0xFFEC4899),
-    Color(0xFF8B5CF6),
-  ];
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final enrollmentsAsync = ref.watch(enrollmentsProvider);
-
-    return enrollmentsAsync.when(
-      loading: () => SizedBox(
-        height: 130,
-        child: ListView.separated(
-          scrollDirection: Axis.horizontal,
-          itemCount: 3,
-          separatorBuilder: (ctx, i) => const SizedBox(width: DS.s12),
-          itemBuilder: (ctx, i) => Container(
-            width: 190,
-            decoration: BoxDecoration(
-              color: DS.border.withValues(alpha: 0.5),
-              borderRadius: BorderRadius.circular(DS.radiusMd),
-            ),
-          ),
-        ),
-      ),
-      error: (e, st) => const SizedBox.shrink(),
-      data: (enrollments) {
-        if (enrollments.isEmpty) {
-          return Container(
-            padding: const EdgeInsets.all(DS.s16),
-            decoration: BoxDecoration(
-              color: DS.surface,
-              borderRadius: BorderRadius.circular(DS.radiusMd),
-              border: Border.all(color: DS.border, width: 1.2),
-            ),
-            child: const Text(
-              'No courses enrolled yet.',
-              style: TextStyle(color: DS.textSecondary, fontSize: 13),
-            ),
-          );
-        }
-        return SizedBox(
-          height: 130,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: enrollments.length,
-            separatorBuilder: (ctx, i) => const SizedBox(width: DS.s12),
-            itemBuilder: (ctx, i) {
-              final e = enrollments[i];
-              final color = _colors[i % _colors.length];
-              final pct = e.progressPercent;
-
-              return GestureDetector(
-                onTap: () => onCourseTap(e.courseId),
-                child: Container(
-                  width: 190,
-                  padding: const EdgeInsets.all(DS.s14),
-                  decoration: BoxDecoration(
-                    color: DS.surface,
-                    borderRadius: BorderRadius.circular(DS.radiusMd),
-                    border: Border.all(color: DS.border, width: 1.2),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.04),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            width: 8,
-                            height: 8,
-                            decoration: BoxDecoration(
-                              color: color,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: DS.s6),
-                          Expanded(
-                            child: Text(
-                              e.courseTitle ?? 'Course',
-                              style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w700,
-                                color: DS.textPrimary,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const Spacer(),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(999),
-                        child: LinearProgressIndicator(
-                          value: e.progressFraction,
-                          backgroundColor: DS.border,
-                          color: color,
-                          minHeight: 6,
-                        ),
-                      ),
-                      const SizedBox(height: DS.s6),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            '$pct% complete',
-                            style: const TextStyle(
-                              color: DS.textSecondary,
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          Icon(
-                            Icons.arrow_forward_rounded,
-                            size: 14,
-                            color: color,
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-        );
-      },
-    );
-  }
-}
-
-// ─────────────────────────────────────────────
 // QUICK LINKS GRID
 // ─────────────────────────────────────────────
 class _QuickLinksGrid extends StatelessWidget {
@@ -1043,12 +688,9 @@ class _QuickLinksGrid extends StatelessWidget {
   @override
   Widget build(BuildContext ctx) {
     final links = [
-      _QLData(Icons.psychology_outlined, 'Doubts', '/doubts'),
-      _QLData(Icons.assignment_outlined, 'Test', '/tests'),
       _QLData(Icons.chat_bubble_outline, 'Mentor Chat', '/mentor-chat'),
       _QLData(Icons.flash_on_outlined, 'Compete', '/compete'),
       _QLData(Icons.insights_outlined, 'My Analytics', '/analytics'),
-      _QLData(Icons.emoji_events_outlined, 'Leaderboard', '/leaderboard'),
     ];
 
     return GridView.builder(
@@ -1056,7 +698,7 @@ class _QuickLinksGrid extends StatelessWidget {
       physics: const NeverScrollableScrollPhysics(),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 3,
-        childAspectRatio: 0.88,
+        childAspectRatio: 1.15,
         crossAxisSpacing: DS.s8,
         mainAxisSpacing: DS.s8,
       ),

@@ -1,7 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_html/flutter_html.dart';
 import 'package:go_router/go_router.dart';
 import 'test_engine_screen.dart';
 
@@ -879,19 +878,6 @@ class _QuestionCard extends StatefulWidget {
 class _QuestionCardState extends State<_QuestionCard> {
   bool _expanded = false;
 
-  static final _tagRe = RegExp(r'<[^>]+>');
-
-  String _stripHtml(String html) => html
-      .replaceAll(_tagRe, ' ')
-      .replaceAll('&amp;', '&')
-      .replaceAll('&lt;', '<')
-      .replaceAll('&gt;', '>')
-      .replaceAll('&nbsp;', ' ')
-      .replaceAll('&quot;', '"')
-      .replaceAll('&#39;', "'")
-      .replaceAll(RegExp(r' {2,}'), ' ')
-      .trim();
-
   bool get _skipped => widget.picked == null;
   bool get _correct {
     if (_skipped) return false;
@@ -1041,35 +1027,15 @@ class _QuestionCardState extends State<_QuestionCard> {
               const SizedBox(height: DS.s10),
 
               // ── Question text ──
-              if (q.hasHtml)
-                LayoutBuilder(
-                  builder: (context, constraints) => Html(
-                    data: q.text,
-                    shrinkWrap: true,
-                    style: {
-                      'body': Style(
-                        fontSize: FontSize(13.5),
-                        color: DS.textPrimary,
-                        lineHeight: const LineHeight(1.5),
-                        margin: Margins.zero,
-                        padding: HtmlPaddings.zero,
-                        maxLines: _expanded ? null : 2,
-                        textOverflow: _expanded ? null : TextOverflow.ellipsis,
-                      ),
-                      'strong': Style(fontWeight: FontWeight.w700),
-                    },
-                  ),
-                )
-              else
-                MathText(
-                  q.text,
-                  style: const TextStyle(
-                    color: DS.textPrimary,
-                    fontSize: 13.5,
-                    height: 1.5,
-                  ),
-                  maxLines: _expanded ? null : 2,
+              MathText(
+                q.text,
+                style: const TextStyle(
+                  color: DS.textPrimary,
+                  fontSize: 13.5,
+                  height: 1.5,
                 ),
+                maxLines: _expanded ? null : 2,
+              ),
 
               // ── Question images ──
               if (_expanded && q.imageUrls.isNotEmpty) ...[
@@ -1294,8 +1260,8 @@ class _QuestionCardState extends State<_QuestionCard> {
                                 ),
                               ),
                               const SizedBox(height: DS.s4),
-                              Text(
-                                _stripHtml(q.explanation!),
+                              MathText(
+                                q.explanation!,
                                 style: const TextStyle(
                                   color: DS.textPrimary,
                                   fontSize: 13,

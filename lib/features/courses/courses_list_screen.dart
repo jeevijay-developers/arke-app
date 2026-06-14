@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/providers.dart';
+import '../profile/data/profile_providers.dart';
 import 'data/courses_providers.dart';
 import 'data/models/course.dart';
 
@@ -85,10 +86,16 @@ class _CoursesListScreenState extends ConsumerState<CoursesListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final async     = ref.watch(coursesProvider);
-    final profile   = ref.watch(profileSetupInfoProvider);
-    final exam      = profile.exam;
-    final userClass = profile.userClass;
+    final async      = ref.watch(coursesProvider);
+    final prefs      = ref.watch(profileSetupInfoProvider);
+    final dbProfile  = ref.watch(userProfileProvider).valueOrNull;
+    // DB profile is authoritative; prefs are the fallback.
+    final exam      = (dbProfile?.targetExam ?? '').isNotEmpty
+        ? dbProfile!.targetExam!
+        : prefs.exam;
+    final userClass = (dbProfile?.classLevel ?? '').isNotEmpty
+        ? dbProfile!.classLevel!
+        : prefs.userClass;
 
     return Scaffold(
       backgroundColor: _C.bg,

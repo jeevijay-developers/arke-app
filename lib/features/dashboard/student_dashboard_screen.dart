@@ -22,7 +22,9 @@ class _DashboardStats {
   const _DashboardStats({required this.testsAttempted});
 }
 
-final _dashboardStatsProvider = FutureProvider.autoDispose<_DashboardStats>((ref) async {
+final _dashboardStatsProvider = FutureProvider.autoDispose<_DashboardStats>((
+  ref,
+) async {
   final client = Supabase.instance.client;
   final userId = client.auth.currentUser?.id;
   if (userId == null) return const _DashboardStats(testsAttempted: 0);
@@ -112,17 +114,13 @@ class StudentDashboardScreen extends ConsumerWidget {
       ),
       child: Scaffold(
         backgroundColor: DS.background,
-        endDrawer: const DashboardDrawer(),
+        endDrawer: const DashboardDrawer(fromRight: true),
         appBar: _DashboardAppBar(name: name),
         body: ListView(
           padding: const EdgeInsets.fromLTRB(DS.s16, DS.s12, DS.s16, DS.s32),
           children: [
             // ── Greeting hero card ──
-            _GreetingCard(
-              name: name,
-              goal: goal,
-              region: region,
-            ),
+            _GreetingCard(name: name, goal: goal, region: region),
             const SizedBox(height: DS.s20),
 
             // ── Stats grid ──
@@ -270,12 +268,6 @@ class StudentDashboardScreen extends ConsumerWidget {
             ),
             const SizedBox(height: DS.s24),
 
-            // ── Quick access ──
-            _SectionHeader(title: 'Quick Access'),
-            const SizedBox(height: DS.s12),
-            _QuickGrid(context: context),
-            const SizedBox(height: DS.s24),
-
             // ── Recommended courses ──
             _SectionHeader(
               title: 'Recommended for You',
@@ -283,28 +275,29 @@ class StudentDashboardScreen extends ConsumerWidget {
               onAction: () => context.go('/courses'),
             ),
             const SizedBox(height: DS.s12),
-            coursesAsync.when(
-              loading: () => const Center(
-                child: CircularProgressIndicator(
-                  color: DS.primary,
-                  strokeWidth: 2.5,
+            SizedBox(
+              height: 240,
+              child: coursesAsync.when(
+                loading: () => const Center(
+                  child: CircularProgressIndicator(
+                    color: DS.primary,
+                    strokeWidth: 2.5,
+                  ),
                 ),
-              ),
-              error: (_, __) => const SizedBox.shrink(),
-              data: (courses) => GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: courses.take(4).length,
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  childAspectRatio: 0.74,
-                  crossAxisSpacing: DS.s12,
-                  mainAxisSpacing: DS.s12,
-                ),
-                itemBuilder: (_, i) => _RecommendedTile(
-                  course: courses[i],
-                  onTap: () => context.push('/course/${courses[i].id}'),
-                ),
+                error: (_, __) => const SizedBox.shrink(),
+                data: (courses) {
+                  final list = courses.take(6).toList();
+                  if (list.isEmpty) return const SizedBox.shrink();
+                  return ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: list.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: DS.s12),
+                    itemBuilder: (_, i) => _RecommendedTile(
+                      course: list[i],
+                      onTap: () => context.push('/course/${list[i].id}'),
+                    ),
+                  );
+                },
               ),
             ),
           ],
@@ -723,14 +716,7 @@ class _StatsGrid extends ConsumerWidget {
     final testsAttempted = statsAsync.value?.testsAttempted ?? 0;
     final testsLabel = statsAsync.isLoading ? '…' : '$testsAttempted';
     final stats = [
-      _StatData(
-        Icons.timer_outlined,
-        'Hours Studied',
-        '—',
-        const Color(0xFF6366F1),
-      ),
       _StatData(Icons.quiz_outlined, 'Tests Attempted', testsLabel, DS.primary),
-      _StatData(Icons.leaderboard_outlined, 'Current Rank', '—', DS.success),
       _StatData(
         Icons.menu_book_outlined,
         'Enrolled',
@@ -745,7 +731,7 @@ class _StatsGrid extends ConsumerWidget {
       itemCount: stats.length,
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
-        childAspectRatio: 1.65,
+        childAspectRatio: 2.0,
         crossAxisSpacing: DS.s12,
         mainAxisSpacing: DS.s12,
       ),
@@ -896,7 +882,6 @@ class _ContinueCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final thumb = enrollment.courseThumbnailUrl ?? '';
-    final pct = enrollment.progressPercent;
 
     return Container(
       decoration: BoxDecoration(
@@ -996,14 +981,6 @@ class _ContinueCard extends StatelessWidget {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      const SizedBox(height: DS.s4),
-                      Text(
-                        '$pct% complete',
-                        style: const TextStyle(
-                          color: DS.textSecondary,
-                          fontSize: 11.5,
-                        ),
-                      ),
                     ],
                   ),
                 ),
@@ -1011,20 +988,11 @@ class _ContinueCard extends StatelessWidget {
             ),
           ),
 
-          // Progress + button
+          // Button
           Padding(
             padding: const EdgeInsets.fromLTRB(DS.s14, 0, DS.s14, DS.s14),
             child: Column(
               children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(999),
-                  child: LinearProgressIndicator(
-                    value: enrollment.progressFraction,
-                    minHeight: 6,
-                    backgroundColor: DS.border,
-                    color: DS.primary,
-                  ),
-                ),
                 const SizedBox(height: DS.s12),
                 SizedBox(
                   width: double.infinity,
@@ -1304,7 +1272,6 @@ class _EnrolledTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final thumb = enrollment.courseThumbnailUrl ?? '';
-    final pct = enrollment.progressPercent;
 
     return GestureDetector(
       onTap: onTap,
@@ -1399,25 +1366,6 @@ class _EnrolledTile extends StatelessWidget {
 
             const Spacer(),
 
-            // Progress
-            ClipRRect(
-              borderRadius: BorderRadius.circular(999),
-              child: LinearProgressIndicator(
-                value: enrollment.progressFraction,
-                minHeight: 5,
-                backgroundColor: DS.border,
-                color: _accent,
-              ),
-            ),
-            const SizedBox(height: DS.s4),
-            Text(
-              '$pct% complete',
-              style: TextStyle(
-                color: _accent,
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
           ],
         ),
       ),
@@ -1556,114 +1504,6 @@ class _TestMeta extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────
-// QUICK ACCESS GRID
-// ─────────────────────────────────────────────
-class _QuickGrid extends StatelessWidget {
-  final BuildContext context;
-  const _QuickGrid({required this.context});
-
-  @override
-  Widget build(BuildContext ctx) {
-    final items = [
-      _QuickData(Icons.psychology_outlined, 'Doubts', '/doubts', DS.indigo),
-      _QuickData(Icons.quiz_outlined, 'Tests', '/tests', DS.primary),
-      _QuickData(
-        Icons.chat_bubble_outline_rounded,
-        'Mentor',
-        '/mentor-chat',
-        DS.teal,
-      ),
-      _QuickData(Icons.flash_on_rounded, 'Compete', '/compete', DS.error),
-      _QuickData(Icons.insights_rounded, 'Analytics', '/analytics', DS.success),
-      _QuickData(
-        Icons.emoji_events_outlined,
-        'Leaderboard',
-        '/leaderboard',
-        DS.warning,
-      ),
-    ];
-
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: items.length,
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        childAspectRatio: 0.95,
-        crossAxisSpacing: DS.s12,
-        mainAxisSpacing: DS.s12,
-      ),
-      itemBuilder: (_, i) =>
-          _QuickTile(data: items[i], onTap: () => context.push(items[i].route)),
-    );
-  }
-}
-
-class _QuickData {
-  final IconData icon;
-  final String label, route;
-  final Color color;
-  const _QuickData(this.icon, this.label, this.route, this.color);
-}
-
-class _QuickTile extends StatelessWidget {
-  final _QuickData data;
-  final VoidCallback onTap;
-  const _QuickTile({required this.data, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () {
-        HapticFeedback.selectionClick();
-        onTap();
-      },
-      child: Container(
-        decoration: BoxDecoration(
-          color: DS.surface,
-          borderRadius: BorderRadius.circular(DS.radiusMd),
-          border: Border.all(color: DS.border, width: 1.2),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.03),
-              blurRadius: 6,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: data.color.withOpacity(0.10),
-                borderRadius: BorderRadius.circular(DS.radiusMd),
-              ),
-              child: Icon(data.icon, color: data.color, size: 22),
-            ),
-            const SizedBox(height: DS.s8),
-            Text(
-              data.label,
-              style: const TextStyle(
-                color: DS.textPrimary,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                height: 1.2,
-              ),
-              textAlign: TextAlign.center,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────
 // RECOMMENDED COURSE TILE
 // ─────────────────────────────────────────────
 class _RecommendedTile extends StatelessWidget {
@@ -1675,7 +1515,9 @@ class _RecommendedTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
+      child: SizedBox(
+        width: 170,
+        child: Container(
         decoration: BoxDecoration(
           color: DS.surface,
           borderRadius: BorderRadius.circular(DS.radiusLg),
@@ -1805,6 +1647,7 @@ class _RecommendedTile extends StatelessWidget {
               ),
             ),
           ],
+        ),
         ),
       ),
     );

@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'data/live_providers.dart';
 import 'data/models/live_class.dart';
 
@@ -319,7 +319,7 @@ class _ZoomLiveRoom extends StatefulWidget {
 }
 
 class _ZoomLiveRoomState extends State<_ZoomLiveRoom> {
-  bool _launching = false;
+  bool _zoomOpen = false;
   bool _chatOpen = false;
   final List<_ChatMsg> _messages = [];
   final TextEditingController _chatCtrl = TextEditingController();
@@ -438,58 +438,124 @@ class _ZoomLiveRoomState extends State<_ZoomLiveRoom> {
     }
   }
 
-  Future<void> _joinZoom() async {
-    final meetingUrl = widget.lc.meetingUrl;
-    if (meetingUrl == null || meetingUrl.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No Zoom meeting link provided for this class.'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+  void _openZoom() {
+    final url = widget.lc.resolvedMeetingUrl;
+    if (url == null || url.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No meeting link set yet. Please wait for the teacher.'),
+          backgroundColor: Colors.red,
+        ),
+      );
       return;
     }
-
-    setState(() => _launching = true);
-    try {
-      final uri = Uri.parse(meetingUrl);
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Could not open Zoom. Please install the Zoom app.'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error opening Zoom: $e'), backgroundColor: Colors.red),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _launching = false);
-    }
+    setState(() => _zoomOpen = true);
   }
 
   @override
   Widget build(BuildContext context) {
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light,
-      child: Scaffold(
-        backgroundColor: const Color(0xFF0A0A0F),
-        body: _chatOpen ? _buildChatPanel(context) : _buildMainView(context),
+    final inSubPanel = _zoomOpen || _chatOpen;
+    return PopScope(
+      // When in a sub-panel, intercept back and close the panel instead of popping the route
+      canPop: !inSubPanel,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && inSubPanel) {
+          setState(() {
+            _zoomOpen = false;
+            _chatOpen = false;
+          });
+        }
+      },
+      child: AnnotatedRegion<SystemUiOverlayStyle>(
+        value: SystemUiOverlayStyle.light,
+        child: Scaffold(
+          backgroundColor: const Color(0xFF0A0A0F),
+          body: _zoomOpen
+              ? _buildZoomWebView(context)
+              : _chatOpen
+                  ? _buildChatPanel(context)
+                  : _buildMainView(context),
+        ),
       ),
     );
   }
 
+  Widget _buildZoomWebView(BuildContext context) {
+    final url = widget.lc.resolvedMeetingUrl!;
+    // Convert zoom.us/j/ID?pwd=X → zoom.us/wc/join/ID?pwd=X (web client, stays in app)
+    final webUrl = url.replaceFirst(
+      RegExp(r'zoom\.us/j/'),
+      'zoom.us/wc/join/',
+    );
+
+    return SafeArea(
+      child: Column(children: [
+        // Top bar
+        Container(
+          color: const Color(0xFF111827),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+            child: Row(children: [
+              IconButton(
+                icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+                onPressed: () => setState(() => _zoomOpen = false),
+                tooltip: 'Back',
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(widget.lc.title,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14),
+                    overflow: TextOverflow.ellipsis),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEF4444),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.circle, color: Colors.white, size: 6),
+                  SizedBox(width: 4),
+                  Text('LIVE',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800)),
+                ]),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                icon: const Icon(Icons.chat_bubble_outline_rounded, color: Colors.white70, size: 20),
+                onPressed: () => setState(() { _zoomOpen = false; _chatOpen = true; _scrollToBottom(); }),
+                tooltip: 'Chat',
+              ),
+            ]),
+          ),
+        ),
+        // WebView
+        Expanded(
+          child: InAppWebView(
+            initialUrlRequest: URLRequest(url: WebUri(webUrl)),
+            initialSettings: InAppWebViewSettings(
+              javaScriptEnabled: true,
+              mediaPlaybackRequiresUserGesture: false,
+              allowsInlineMediaPlayback: true,
+              useHybridComposition: true,
+              userAgent:
+                  'Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 '
+                  '(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+            ),
+          ),
+        ),
+      ]),
+    );
+  }
+
   Widget _buildMainView(BuildContext context) {
+    final hasLink = widget.lc.resolvedMeetingUrl != null;
     return Stack(children: [
       Container(
         decoration: const BoxDecoration(
@@ -566,9 +632,11 @@ class _ZoomLiveRoomState extends State<_ZoomLiveRoom> {
                             fontSize: 22,
                             fontWeight: FontWeight.w800)),
                     const SizedBox(height: 8),
-                    const Text(
-                      'Tap the button below to join the live class in Zoom.',
-                      style: TextStyle(
+                    Text(
+                      hasLink
+                          ? 'Tap the button below to join the live class.'
+                          : 'Waiting for the teacher to share the meeting link…',
+                      style: const TextStyle(
                           color: Colors.white54,
                           fontSize: 13.5,
                           height: 1.6),
@@ -602,22 +670,17 @@ class _ZoomLiveRoomState extends State<_ZoomLiveRoom> {
                       width: double.infinity,
                       height: 56,
                       child: ElevatedButton.icon(
-                        onPressed: _launching ? null : _joinZoom,
-                        icon: _launching
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                    color: Colors.white, strokeWidth: 2.5))
-                            : const Icon(Icons.videocam_rounded, size: 22),
-                        label: Text(
-                          _launching ? 'Opening Zoom…' : 'Join Zoom Meeting',
-                          style: const TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.w700),
+                        onPressed: hasLink ? _openZoom : null,
+                        icon: const Icon(Icons.videocam_rounded, size: 22),
+                        label: const Text(
+                          'Join Live Class',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
                         ),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF2D8CFF),
                           foregroundColor: Colors.white,
+                          disabledBackgroundColor: Colors.white12,
+                          disabledForegroundColor: Colors.white38,
                           elevation: 0,
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(14)),

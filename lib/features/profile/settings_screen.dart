@@ -161,14 +161,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                             subtitle: 'Update your name, photo and preferences',
                             onTap: () => context.push('/edit-profile'),
                           ),
-                          _SettingsDivider(),
-                          _SettingsTile(
-                            icon: Icons.lock_outline_rounded,
-                            color: DS.indigo,
-                            label: 'Change Password',
-                            subtitle: 'Update your login credentials',
-                            onTap: () => context.push('/forgot'),
-                          ),
                         ],
                       ),
 

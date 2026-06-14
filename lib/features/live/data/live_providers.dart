@@ -4,7 +4,7 @@ import 'models/live_class.dart';
 
 const _liveSelect =
     'id, title, subject, educator_name, educator_avatar, '
-    'starts_at, ends_at, meeting_url, status, description, recording_url, course_id, slug';
+    'starts_at, ends_at, meeting_url, zoom_meeting_id, zoom_meeting_password, status, description, recording_url, course_id, slug';
 
 /// Fetches only classes the student can access:
 /// 1. Standalone classes (course_id IS NULL)

@@ -24,7 +24,7 @@ class AuthRepository {
 
   AuthUser? _mockUser; // kept only as fallback when Supabase is unavailable
 
-  /// Step 1 — send 6-digit OTP to the phone via Twilio (configured in Supabase).
+  /// Step 1 — send 6-digit OTP to the phone via MSG91 (configured in Supabase).
   Future<void> sendPhoneOtp({required String phone}) async {
     final sb = supabaseOrNull;
     if (sb == null) return;
@@ -67,64 +67,27 @@ class AuthRepository {
       await sb.auth.signOut();
     }
 
-    await sb.auth.verifyOTP(phone: e164, token: token, type: OtpType.sms);
-
-    // Clear cached profile so we always re-check from DB
+    // Clear cached profile BEFORE verifyOTP so that when onAuthStateChange
+    // fires the router redirect it always reads profileSetupDone=false,
+    // then restoreProfileFromDb sets it back to true for returning users.
     await _prefs.setProfileSetupDone(false);
     await _prefs.setUserName('');
     await _prefs.setUserClass('');
     await _prefs.setUserExam('');
+
+    await sb.auth.verifyOTP(phone: e164, token: token, type: OtpType.sms);
+
     await _prefs.setPhoneNumber(phone);
     await _prefs.setPhoneSignedIn(true);
 
-    // Small delay lets any DB trigger (auto-create profiles row) settle
-    // before we query — avoids race where maybeSingle() returns null for
-    // a row that was just being inserted.
-    await Future.delayed(const Duration(milliseconds: 300));
+    // Delay lets the DB trigger (auto-create profiles row) settle and also
+    // gives the router redirect time to see profileSetupDone=false before
+    // restoreProfileFromDb overwrites it for returning users.
+    await Future.delayed(const Duration(milliseconds: 500));
 
     final hasProfile = await restoreProfileFromDb();
     debugPrint('[Auth] verifyPhoneOtp → hasProfile=$hasProfile uid=${sb.auth.currentUser?.id}');
     return hasProfile;
-  }
-
-  /// Called after OTP is verified.
-  /// Reuses the existing anonymous account for this phone if one exists,
-  /// otherwise creates a new anonymous session.
-  Future<void> setMockUser({required String phone}) async {
-    final sb = supabaseOrNull;
-    if (sb != null) {
-      final current = sb.auth.currentUser;
-      final currentPhone = current != null
-          ? (current.userMetadata?['phone'] as String? ?? '')
-          : '';
-
-      // Sign out if a different phone is signing in
-      if (current != null && currentPhone != phone) {
-        await sb.auth.signOut();
-      }
-
-      // Always clear cached profile state before checking DB below
-      await _prefs.setProfileSetupDone(false);
-      await _prefs.setUserName('');
-      await _prefs.setUserClass('');
-      await _prefs.setUserExam('');
-
-      // Create a new anonymous session only if none exists
-      if (sb.auth.currentUser == null) {
-        await sb.auth.signInAnonymously(data: {'phone': phone});
-      }
-
-      await _prefs.setPhoneNumber(phone);
-      await _prefs.setPhoneSignedIn(true);
-    } else {
-      _mockUser = AuthUser(
-        id: 'phone-${phone.hashCode}',
-        name: phone,
-      );
-      await _prefs.setProfileSetupDone(false);
-      await _prefs.setPhoneSignedIn(true);
-      await _prefs.setPhoneNumber(phone);
-    }
   }
 
   /// After sign-in, load profile from DB and sync to prefs.
@@ -229,18 +192,11 @@ class AuthRepository {
   // ── "Continue with Google" — sends 6-digit OTP to Gmail ─────────────────
   Future<void> signInWithGoogle(String email) async {
     final sb = supabaseOrNull;
-    if (sb != null) {
-      await sb.auth.signInWithOtp(
-        email: email,
-        shouldCreateUser: true,
-      );
-    } else {
-      _mockUser = AuthUser(
-        id: 'mock-${email.hashCode}',
-        email: email,
-        name: email.split('@').first,
-      );
-    }
+    if (sb == null) return;
+    await sb.auth.signInWithOtp(
+      email: email,
+      shouldCreateUser: true,
+    );
   }
 
   // ── Verify 6-digit OTP entered by the user ───────────────────────────────
@@ -250,19 +206,12 @@ class AuthRepository {
     bool isGoogleFlow = false,
   }) async {
     final sb = supabaseOrNull;
-    if (sb != null) {
-      await sb.auth.verifyOTP(
-        email: email,
-        token: token,
-        type: OtpType.email,
-      );
-    } else {
-      _mockUser = AuthUser(
-        id: 'mock-${email.hashCode}',
-        email: email,
-        name: email.split('@').first,
-      );
-    }
+    if (sb == null) return;
+    await sb.auth.verifyOTP(
+      email: email,
+      token: token,
+      type: OtpType.email,
+    );
   }
 
   // ── Resend OTP ───────────────────────────────────────────────────────────
@@ -298,19 +247,12 @@ class AuthRepository {
     required String token,
   }) async {
     final sb = supabaseOrNull;
-    if (sb != null) {
-      await sb.auth.verifyOTP(
-        email: email,
-        token: token,
-        type: OtpType.magiclink,
-      );
-    } else {
-      _mockUser = AuthUser(
-        id: 'mock-${email.hashCode}',
-        email: email,
-        name: email.split('@').first,
-      );
-    }
+    if (sb == null) return;
+    await sb.auth.verifyOTP(
+      email: email,
+      token: token,
+      type: OtpType.magiclink,
+    );
   }
 
   // ── Update password after OTP verified ──────────────────────────────────
@@ -319,11 +261,6 @@ class AuthRepository {
     if (sb != null) {
       await sb.auth.updateUser(UserAttributes(password: newPassword));
     }
-  }
-
-  Future<void> sendPasswordReset(String email) async {
-    final sb = supabaseOrNull;
-    if (sb != null) await sb.auth.resetPasswordForEmail(email);
   }
 
   Future<void> signOut() async {

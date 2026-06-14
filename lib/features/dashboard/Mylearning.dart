@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -110,17 +109,7 @@ class _LoadedScreen extends StatelessWidget {
     required this.onCardTap,
   });
 
-  // ── Derived stats ──
-  int get _completed =>
-      enrollments.where((e) => e.progressPercent == 100).length;
-  int get _inProgress => enrollments
-      .where((e) => e.progressPercent > 0 && e.progressPercent < 100)
-      .length;
-  double get _avgProgress {
-    if (enrollments.isEmpty) return 0;
-    return enrollments.fold<double>(0, (s, e) => s + e.progressPercent) /
-        enrollments.length;
-  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -133,19 +122,6 @@ class _LoadedScreen extends StatelessWidget {
             enrollmentCount: enrollments.length,
             onBack: onBack,
             onBrowse: onBrowse,
-          ),
-        ),
-
-        // ── Stats row ──
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(DS.s16, DS.s20, DS.s16, 0),
-            child: _StatsRow(
-              total: enrollments.length,
-              completed: _completed,
-              inProgress: _inProgress,
-              avgPct: _avgProgress,
-            ),
           ),
         ),
 
@@ -302,15 +278,11 @@ class _MyLearningHeaderDelegate extends SliverPersistentHeaderDelegate {
 
             // ── Expanded ──
             firstChild: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                DS.s16,
-                DS.s8,
-                DS.s16,
-                DS.s12,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: DS.s16, vertical: DS.s8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Row(
                     children: [
@@ -318,8 +290,8 @@ class _MyLearningHeaderDelegate extends SliverPersistentHeaderDelegate {
                       GestureDetector(
                         onTap: onBack,
                         child: Container(
-                          width: 34,
-                          height: 34,
+                          width: 30,
+                          height: 30,
                           decoration: BoxDecoration(
                             color: Colors.white.withOpacity(0.18),
                             borderRadius: BorderRadius.circular(DS.radiusSm),
@@ -327,7 +299,7 @@ class _MyLearningHeaderDelegate extends SliverPersistentHeaderDelegate {
                           child: const Icon(
                             Icons.arrow_back_ios_new_rounded,
                             color: Colors.white,
-                            size: 16,
+                            size: 14,
                           ),
                         ),
                       ),
@@ -337,8 +309,8 @@ class _MyLearningHeaderDelegate extends SliverPersistentHeaderDelegate {
                         onTap: onBrowse,
                         child: Container(
                           padding: const EdgeInsets.symmetric(
-                            horizontal: DS.s12,
-                            vertical: DS.s8,
+                            horizontal: DS.s10,
+                            vertical: DS.s4,
                           ),
                           decoration: BoxDecoration(
                             color: Colors.white.withOpacity(0.20),
@@ -354,14 +326,14 @@ class _MyLearningHeaderDelegate extends SliverPersistentHeaderDelegate {
                               Icon(
                                 Icons.add_rounded,
                                 color: Colors.white,
-                                size: 14,
+                                size: 13,
                               ),
                               SizedBox(width: DS.s4),
                               Text(
                                 'Browse More',
                                 style: TextStyle(
                                   color: Colors.white,
-                                  fontSize: 12,
+                                  fontSize: 11,
                                   fontWeight: FontWeight.w700,
                                 ),
                               ),
@@ -371,21 +343,21 @@ class _MyLearningHeaderDelegate extends SliverPersistentHeaderDelegate {
                       ),
                     ],
                   ),
-                  const SizedBox(height: DS.s12),
+                  const SizedBox(height: DS.s4),
                   const Text(
                     'My Learning 📚',
                     style: TextStyle(
-                      fontSize: 24,
+                      fontSize: 18,
                       fontWeight: FontWeight.w800,
                       color: Colors.white,
                       letterSpacing: -0.4,
                     ),
                   ),
-                  const SizedBox(height: DS.s4),
+                  const SizedBox(height: 1),
                   Text(
                     '$enrollmentCount course${enrollmentCount == 1 ? '' : 's'} enrolled · Keep going!',
                     style: TextStyle(
-                      fontSize: 13,
+                      fontSize: 11.5,
                       color: Colors.white.withOpacity(0.80),
                     ),
                   ),
@@ -463,124 +435,6 @@ class _MyLearningHeaderDelegate extends SliverPersistentHeaderDelegate {
 }
 
 // ─────────────────────────────────────────────
-// STATS ROW
-// ─────────────────────────────────────────────
-class _StatsRow extends StatelessWidget {
-  final int total, completed, inProgress;
-  final double avgPct;
-
-  const _StatsRow({
-    required this.total,
-    required this.completed,
-    required this.inProgress,
-    required this.avgPct,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        _StatTile(
-          value: '$total',
-          label: 'Enrolled',
-          icon: Icons.menu_book_rounded,
-          color: DS.primary,
-        ),
-        const SizedBox(width: DS.s10),
-        _StatTile(
-          value: '$inProgress',
-          label: 'In Progress',
-          icon: Icons.play_circle_outline_rounded,
-          color: DS.indigo,
-        ),
-        const SizedBox(width: DS.s10),
-        _StatTile(
-          value: '$completed',
-          label: 'Completed',
-          icon: Icons.check_circle_outline_rounded,
-          color: DS.success,
-        ),
-        const SizedBox(width: DS.s10),
-        _StatTile(
-          value: '${avgPct.toStringAsFixed(0)}%',
-          label: 'Avg. Progress',
-          icon: Icons.insights_rounded,
-          color: DS.warning,
-        ),
-      ],
-    );
-  }
-}
-
-class _StatTile extends StatelessWidget {
-  final String value, label;
-  final IconData icon;
-  final Color color;
-
-  const _StatTile({
-    required this.value,
-    required this.label,
-    required this.icon,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(
-          vertical: DS.s12,
-          horizontal: DS.s8,
-        ),
-        decoration: BoxDecoration(
-          color: DS.surface,
-          borderRadius: BorderRadius.circular(DS.radiusMd),
-          border: Border.all(color: DS.border, width: 1.2),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.03),
-              blurRadius: 6,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Column(
-          children: [
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: color.withOpacity(0.10),
-                borderRadius: BorderRadius.circular(DS.radiusSm),
-              ),
-              child: Icon(icon, color: color, size: 16),
-            ),
-            const SizedBox(height: DS.s6),
-            Text(
-              value,
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                color: DS.textPrimary,
-                height: 1.1,
-              ),
-            ),
-            const SizedBox(height: DS.s2),
-            Text(
-              label,
-              style: const TextStyle(fontSize: 10, color: DS.textSecondary),
-              textAlign: TextAlign.center,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────
 // ENROLLMENT CARD
 // ─────────────────────────────────────────────
 class _EnrollmentCard extends StatelessWidget {
@@ -608,9 +462,7 @@ class _EnrollmentCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final pct = enrollment.progressPercent;
     final thumb = enrollment.courseThumbnailUrl ?? '';
-    final isDone = pct == 100;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: DS.s12),
@@ -674,25 +526,6 @@ class _EnrollmentCard extends StatelessWidget {
                                   ),
                                 ),
                         ),
-                        // Completed badge on thumbnail
-                        if (isDone)
-                          Positioned(
-                            top: DS.s4,
-                            right: DS.s4,
-                            child: Container(
-                              width: 20,
-                              height: 20,
-                              decoration: const BoxDecoration(
-                                color: DS.success,
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(
-                                Icons.check_rounded,
-                                color: Colors.white,
-                                size: 12,
-                              ),
-                            ),
-                          ),
                       ],
                     ),
 
@@ -785,19 +618,17 @@ class _EnrollmentCard extends StatelessWidget {
 
                     const SizedBox(width: DS.s6),
 
-                    // Play / Done icon
+                    // Play icon
                     Container(
                       width: 32,
                       height: 32,
                       decoration: BoxDecoration(
-                        color: isDone ? DS.successSurface : DS.primaryLight,
+                        color: DS.primaryLight,
                         borderRadius: BorderRadius.circular(DS.radiusSm),
                       ),
-                      child: Icon(
-                        isDone
-                            ? Icons.check_circle_rounded
-                            : Icons.play_arrow_rounded,
-                        color: isDone ? DS.success : DS.primary,
+                      child: const Icon(
+                        Icons.play_arrow_rounded,
+                        color: DS.primary,
                         size: 18,
                       ),
                     ),
@@ -805,56 +636,6 @@ class _EnrollmentCard extends StatelessWidget {
                 ),
               ),
 
-              // ── Bottom: progress bar section ──
-              Container(
-                padding: const EdgeInsets.fromLTRB(DS.s14, 0, DS.s14, DS.s14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Progress bar
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(999),
-                      child: LinearProgressIndicator(
-                        value: enrollment.progressFraction,
-                        minHeight: 7,
-                        backgroundColor: DS.border,
-                        color: isDone ? DS.success : _accent,
-                      ),
-                    ),
-
-                    const SizedBox(height: DS.s8),
-
-                    // Progress row
-                    Row(
-                      children: [
-                        // Percentage badge
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: DS.s8,
-                            vertical: DS.s4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: isDone
-                                ? DS.successSurface
-                                : _accent.withOpacity(0.10),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Text(
-                            isDone ? '✓ Completed' : '$pct% complete',
-                            style: TextStyle(
-                              color: isDone ? DS.success : _accent,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-
-                        const Spacer(),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
             ],
           ),
         ),

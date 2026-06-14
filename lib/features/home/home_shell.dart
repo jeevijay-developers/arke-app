@@ -67,7 +67,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       route: '/courses',
       iconOff: Icons.menu_book_outlined,
       iconOn: Icons.menu_book_rounded,
-      label: 'Courses',
+      label: ' My Courses',
     ),
     (
       route: '/compete',
@@ -76,10 +76,10 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       label: 'Compete',
     ),
     (
-      route: '/doubts',
-      iconOff: Icons.help_outline_rounded,
-      iconOn: Icons.help_rounded,
-      label: 'Doubts',
+      route: '/store',
+      iconOff: Icons.storefront_outlined,
+      iconOn: Icons.storefront_rounded,
+      label: 'Store',
     ),
     (
       route: '/profile',
@@ -108,8 +108,10 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     final displayName = profile?.fullName?.trim().isNotEmpty == true
         ? profile!.fullName!.trim()
         : setupInfo.name.isNotEmpty
-            ? setupInfo.name
-            : (user?.name?.trim().isNotEmpty == true ? user!.name!.trim() : 'Learner');
+        ? setupInfo.name
+        : (user?.name?.trim().isNotEmpty == true
+              ? user!.name!.trim()
+              : 'Learner');
     final initials = _initials(displayName);
     final currentIdx = _index;
 
@@ -119,10 +121,10 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         statusBarIconBrightness: Brightness.dark,
       ),
       child: PopScope(
-        canPop: widget.location == '/courses',
+        canPop: widget.location == '/home',
         onPopInvokedWithResult: (didPop, _) {
-          if (!didPop && widget.location != '/courses') {
-            context.go('/courses');
+          if (!didPop && widget.location != '/home') {
+            context.go('/home');
           }
         },
         child: Scaffold(

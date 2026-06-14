@@ -77,22 +77,18 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
       return;
     }
     setState(() { _loading = true; _error = null; });
+    // Block the router redirect while we verify so onAuthStateChange cannot
+    // fire a premature navigation before restoreProfileFromDb completes.
+    ref.read(verifyingOtpProvider.notifier).state = true;
     try {
-      // Set routing flag BEFORE verifyOTP so _AuthListenable fires with the
-      // correct destination already known. isRegistered=true → home, false → profile-setup.
-      ref.read(needsProfileSetupProvider.notifier).state = !widget.isRegistered;
-
       final repo = ref.read(authRepositoryProvider);
       final hasProfile = await repo.verifyPhoneOtp(
         phone: widget.phone,
         token: _otp,
       );
       if (!mounted) return;
-      // Correct the flag based on actual DB result (handles edge cases where
-      // registration status changed between OTP send and verify).
-      ref.read(needsProfileSetupProvider.notifier).state = !hasProfile;
       if (hasProfile) {
-        context.go('/home');
+        context.go('/courses');
       } else {
         context.go('/profile-setup');
       }
@@ -108,6 +104,8 @@ class _PhoneOtpScreenState extends ConsumerState<PhoneOtpScreen> {
       });
       for (final c in _controllers) { c.clear(); }
       if (mounted) _focusNodes[0].requestFocus();
+    } finally {
+      if (mounted) ref.read(verifyingOtpProvider.notifier).state = false;
     }
   }
 

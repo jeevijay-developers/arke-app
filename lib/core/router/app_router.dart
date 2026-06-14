@@ -13,6 +13,7 @@ import '../../features/auth/widgets/student_gate.dart';
 import '../../features/courses/course_detail_screen.dart';
 import '../../features/courses/course_home_screen.dart';
 import '../../features/courses/courses_list_screen.dart';
+import '../../features/courses/course_store_screen.dart';
 import '../../features/courses/folder_view_screen.dart';
 import '../../features/courses/lecture_player_screen.dart';
 import '../../features/dashboard/student_dashboard_screen.dart';
@@ -23,7 +24,6 @@ import '../../features/dashboard/compete_screen.dart';
 import '../../features/dashboard/analytics_screen.dart';
 import '../../features/dashboard/leaderboard_screen.dart';
 import '../../features/dashboard/favourites_screen.dart';
-import '../../features/dashboard/store_screen.dart';
 import '../../features/dashboard/Mylearning.dart';
 import '../../features/home/home_shell.dart';
 import '../../features/home/home_screen.dart';
@@ -65,18 +65,22 @@ final routerProvider = Provider<GoRouter>((ref) {
       // Read all state inside the callback — never watch in the provider body
       final resetInProgress = ref.read(passwordResetInProgressProvider);
       if (resetInProgress) return null;
+      // Block all redirects while OTP verification + DB profile check is running.
+      final verifyingOtp = ref.read(verifyingOtpProvider);
+      if (verifyingOtp) return null;
       final signedIn = auth.isSignedIn || ref.read(authStateProvider);
       final atAuth = loc == '/login' || loc == '/signup' || loc == '/verify-otp';
       final atPasswordReset = loc == '/forgot' || loc == '/forgot-otp' || loc == '/reset-password';
       if (loc == '/onboarding') return null;
-      // If profile-setup flag is set, signed-in user goes to /profile-setup
-      // regardless of current location (including /phone-otp).
-      final needsSetup = ref.read(needsProfileSetupProvider);
-      debugPrint('[Router] loc=$loc signedIn=$signedIn needsSetup=$needsSetup');
-      if (signedIn && needsSetup && loc != '/profile-setup') return '/profile-setup';
-      if (loc == '/profile-setup') return null;
-      // Only block /phone-otp redirect when NOT needing setup (unauthenticated state)
       if (loc == '/phone-otp') return null;
+      // For signed-in users, use profileSetupDone from prefs as the source of
+      // truth — it is written by verifyPhoneOtp BEFORE onAuthStateChange fires,
+      // so it is always correct by the time this redirect runs.
+      final prefs = ref.read(prefsProvider);
+      final profileDone = prefs.profileSetupDone;
+      debugPrint('[Router] loc=$loc signedIn=$signedIn profileDone=$profileDone');
+      if (signedIn && !profileDone && loc != '/profile-setup') return '/profile-setup';
+      if (loc == '/profile-setup') return null;
       if (!signedIn && !atAuth && !atPasswordReset) return '/login';
       if (signedIn && atAuth) return '/courses';
       return null;
@@ -134,6 +138,10 @@ final routerProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: '/courses',
             builder: (_, __) => const CoursesListScreen(),
+          ),
+          GoRoute(
+            path: '/store',
+            builder: (_, __) => const CourseStoreScreen(),
           ),
           GoRoute(
             path: '/profile',
@@ -273,11 +281,6 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/favourites',
         parentNavigatorKey: _rootKey,
         builder: (_, __) => const StudentGate(child: FavouritesScreen()),
-      ),
-      GoRoute(
-        path: '/store',
-        parentNavigatorKey: _rootKey,
-        builder: (_, __) => const StudentGate(child: StoreScreen()),
       ),
       GoRoute(
         path: '/mentor-chat',

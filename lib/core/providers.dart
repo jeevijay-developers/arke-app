@@ -4,7 +4,9 @@ import 'storage/preferences.dart';
 final prefsProvider = Provider<Prefs>((ref) => throw UnimplementedError('override in main'));
 
 /// Exposes the name/class/exam saved during profile setup (phone-auth flow).
-/// Returns null strings when not yet set.
+/// Returns empty strings when not yet set.
+/// Screens that need the DB-authoritative exam should also watch
+/// userProfileProvider and prefer its targetExam/classLevel values.
 class ProfileSetupInfo {
   final String name;
   final String userClass;
@@ -19,9 +21,9 @@ class ProfileSetupInfo {
 final profileSetupInfoProvider = Provider<ProfileSetupInfo>((ref) {
   final prefs = ref.watch(prefsProvider);
   return ProfileSetupInfo(
-    name: prefs.userName,
+    name:      prefs.userName,
     userClass: prefs.userClass,
-    exam: prefs.userExam,
+    exam:      prefs.userExam,
   );
 });
 
@@ -46,3 +48,7 @@ final passwordResetInProgressProvider = StateProvider<bool>((ref) => false);
 // The router reads this to decide whether to send the user to /profile-setup
 // instead of /home. Cleared once the user reaches /profile-setup.
 final needsProfileSetupProvider = StateProvider<bool>((ref) => false);
+
+// True while verifyPhoneOtp is in progress. Blocks the router redirect so
+// restoreProfileFromDb can finish writing profileSetupDone before routing.
+final verifyingOtpProvider = StateProvider<bool>((ref) => false);

@@ -7,6 +7,8 @@ class LiveClass {
   final DateTime startsAt;
   final DateTime? endsAt;
   final String? meetingUrl;
+  final String? zoomMeetingId;
+  final String? zoomMeetingPassword;
   final String status;
   final String? description;
   final String? recordingUrl;
@@ -22,12 +24,27 @@ class LiveClass {
     required this.startsAt,
     this.endsAt,
     this.meetingUrl,
+    this.zoomMeetingId,
+    this.zoomMeetingPassword,
     required this.status,
     this.description,
     this.recordingUrl,
     this.courseId,
     this.slug,
   });
+
+  /// Resolved join URL: explicit meeting_url wins, else construct from zoom_meeting_id + password.
+  String? get resolvedMeetingUrl {
+    if (meetingUrl != null && meetingUrl!.isNotEmpty) return meetingUrl;
+    if (zoomMeetingId != null && zoomMeetingId!.isNotEmpty) {
+      final base = 'https://zoom.us/j/$zoomMeetingId';
+      if (zoomMeetingPassword != null && zoomMeetingPassword!.isNotEmpty) {
+        return '$base?pwd=$zoomMeetingPassword';
+      }
+      return base;
+    }
+    return null;
+  }
 
   bool get isLive => status == 'live';
   bool get isPast => status == 'completed' || status == 'cancelled';
@@ -41,6 +58,8 @@ class LiveClass {
     startsAt: DateTime.parse(json['starts_at'] as String),
     endsAt: json['ends_at'] != null ? DateTime.parse(json['ends_at'] as String) : null,
     meetingUrl: json['meeting_url'] as String?,
+    zoomMeetingId: json['zoom_meeting_id'] as String?,
+    zoomMeetingPassword: json['zoom_meeting_password'] as String?,
     status: json['status'] as String? ?? 'scheduled',
     description: json['description'] as String?,
     recordingUrl: json['recording_url'] as String?,
